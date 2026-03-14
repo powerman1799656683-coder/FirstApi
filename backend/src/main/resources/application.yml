@@ -1,0 +1,34 @@
+server:
+  port: 8080
+  forward-headers-strategy: framework
+
+spring:
+  datasource:
+    url: jdbc:mysql://127.0.0.1:3306/${MYSQL_DATABASE:firstapi}?createDatabaseIfNotExist=true&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=utf8&useUnicode=true
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    username: ${MYSQL_USERNAME:root}
+    password: ${MYSQL_PASSWORD:root}
+  jackson:
+    time-zone: Asia/Shanghai
+  sql:
+    init:
+      mode: always
+      encoding: UTF-8
+
+app:
+  auth:
+    cookie-name: ${FIRSTAPI_SESSION_COOKIE:FIRSTAPI_SESSION}
+    session-ttl-minutes: ${FIRSTAPI_SESSION_TTL_MINUTES:480}
+    secure-cookie: ${FIRSTAPI_SESSION_SECURE_COOKIE:false}
+    same-site: ${FIRSTAPI_SESSION_SAME_SITE:Strict}
+    admin-username: ${FIRSTAPI_ADMIN_USERNAME:admin}
+    admin-display-name: ${FIRSTAPI_ADMIN_DISPLAY_NAME:Admin User}
+    admin-email: ${FIRSTAPI_ADMIN_EMAIL:admin@example.com}
+    admin-password: ${FIRSTAPI_ADMIN_PASSWORD:change-me-before-public-deploy}
+    user-enabled: ${FIRSTAPI_USER_ENABLED:false}
+    user-username: ${FIRSTAPI_USER_USERNAME:member}
+    user-display-name: ${FIRSTAPI_USER_DISPLAY_NAME:Member User}
+    user-email: ${FIRSTAPI_USER_EMAIL:member@example.com}
+    user-password: ${FIRSTAPI_USER_PASSWORD:}
+  security:
+    data-secret: ${FIRSTAPI_DATA_SECRET:local-dev-data-secret-change-me}

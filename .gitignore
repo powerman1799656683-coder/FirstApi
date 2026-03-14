@@ -1,0 +1,50 @@
+# Backend
+backend/target/
+*.jar
+*.class
+
+# Database files
+backend/data/
+*.db
+*.lock.db
+*.trace.db
+
+# Temp files
+backend/.tmp_*
+backend/tmp_*
+backend/.mysql-test.*
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+
+# IDE
+.idea/
+.vscode/
+*.iml
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Maven local repo
+.m2repo/
+
+# Docs archive
+API_doc.zip
+API_doc_extract/
+
+# npm cache
+.npm-cache/
+
+# Claude settings
+**/.claude/
+
+# Misc
+*.log
+*.local
