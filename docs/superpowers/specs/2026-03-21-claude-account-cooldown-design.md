@@ -34,6 +34,7 @@
 - 重置时间为 RFC 3339 格式时间戳。
 
 ## 3. 主流处理原则（本项目采用）
+- 原则依据官方错误类型与 HTTP `Retry-After` 语义制定，兼顾可恢复性与误伤控制。
 - 仅当 **HTTP 429 且 `error.type = rate_limit_error`** 时触发冷却。
 - 402 `billing_error`：计费问题，**不自动恢复**，仅管理员处理。
 - 401 `authentication_error`：鉴权/Key 问题，**不触发冷却**，仅标记异常。
@@ -42,6 +43,7 @@
 
 ## 4. 冷却时间计算与恢复
 - Claude 文档中 `retry-after` 为秒数；本实现同时支持 HTTP 语义的秒数或 HTTP 日期解析。
+- 若为 HTTP 日期，按 UTC 解析，计算 `retry_at = max(parsed_time, now)`。
 - 若 `retry-after` 缺失或解析失败：**不自动恢复**，标记为需人工确认。
 - 固定缓冲：**30 秒**。
 - 探测提前量：**10 秒**。
@@ -54,16 +56,17 @@
 ## 5. 主动探测与恢复规则
 - 到达 `probe_at` 时由系统发起**轻量探测请求**（最小输入、最小输出）。
 - 探测成功（2xx 且非 429）：标记账号为“已探测通过”，到达 `recover_at` 时恢复可用。
+- 当 `recover_at` 到达且已 `PROBED_OK`，切换状态为 `AVAILABLE`。
 - 探测返回 429 `rate_limit_error`：以新的 `retry-after` 重新计算 `retry_at/recover_at/probe_at`。
 - 探测返回 401/402：标记为鉴权/计费异常，转人工处理。
-- 探测返回 5xx/529：不恢复，保持冷却并记录告警；允许后续再次探测。
+- 探测返回 5xx/529：不恢复，保持冷却并记录告警；`recover_at/probe_at` 不变，等待下一次探测调度。
 - 单账号仅保留一条探测任务；新的冷却时间以更晚的 `recover_at` 覆盖。
 
 ## 6. 可选扩展（默认关闭）
 - 连续 429 过度冷却（限流频繁触发时增加额外冷却），默认不启用。
 
 ## 7. 冷却状态与字段建议
-- `cooldown_status`：`AVAILABLE` / `COOLDOWN` / `PROBING` / `PROBED_OK`
+- `cooldown_status`：`AVAILABLE` / `COOLDOWN` / `PROBING` / `PROBED_OK`（探测通过，等待 `recover_at`）
 - `cooldown_reason`：`claude_rate_limit` / `claude_billing_error` / `manual`
 - `cooldown_until`：`recover_at`
 - `cooldown_probe_at`：`probe_at`
