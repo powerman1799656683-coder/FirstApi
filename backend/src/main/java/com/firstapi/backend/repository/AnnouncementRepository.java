@@ -30,9 +30,9 @@ public class AnnouncementRepository extends JdbcListRepository<AnnouncementItem>
     @Override
     protected List<AnnouncementItem> defaultItems() {
         return Arrays.asList(
-                new AnnouncementItem(1L, "系统升级通知", "今晚 23:00 至 23:30 进行例行升级。", "更新", "发布中", "所有用户", "2026/03/13 20:00:00"),
-                new AnnouncementItem(2L, "VIP 分组调整", "VIP 用户将获得更高优先级。", "通知", "发布中", "VIP", "2026/03/12 10:00:00"),
-                new AnnouncementItem(3L, "内测问卷", "欢迎填写内测反馈问卷。", "活动", "草稿", "所有用户", "2026/03/10 09:30:00")
+                new AnnouncementItem(1L, "系统维护通知", "今晚 23:00 至 23:30 将进行短时维护升级。", "维护", "发布中", "所有用户", "2026/03/13 20:00:00"),
+                new AnnouncementItem(2L, "VIP 服务升级", "VIP 用户将获得更高优先级和更稳定配额。", "更新", "发布中", "VIP", "2026/03/12 10:00:00"),
+                new AnnouncementItem(3L, "内测招募", "欢迎填写内测反馈与建议。", "活动", "草稿", "所有用户", "2026/03/10 09:30:00")
         );
     }
 

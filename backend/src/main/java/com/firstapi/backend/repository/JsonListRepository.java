@@ -3,7 +3,7 @@ package com.firstapi.backend.repository;
 import com.firstapi.backend.common.SimpleStore;
 import com.firstapi.backend.store.JsonStorePersistence;
 
-import javax.annotation.PostConstruct;
+import jakarta.annotation.PostConstruct;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;

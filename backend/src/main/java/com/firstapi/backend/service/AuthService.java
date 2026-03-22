@@ -2,12 +2,17 @@ package com.firstapi.backend.service;
 
 import com.firstapi.backend.config.AuthProperties;
 import com.firstapi.backend.model.AuthLoginRequest;
+import com.firstapi.backend.model.AuthRegisterRequest;
 import com.firstapi.backend.model.AuthUser;
 import com.firstapi.backend.model.AuthenticatedUser;
 import com.firstapi.backend.repository.AuthUserRepository;
 import com.firstapi.backend.util.PasswordHashSupport;
 import com.firstapi.backend.util.TimeSupport;
 import com.firstapi.backend.util.ValidationSupport;
+import com.firstapi.backend.model.SettingsData;
+import com.firstapi.backend.model.UserItem;
+import com.firstapi.backend.repository.UserRepository;
+import com.firstapi.backend.service.SettingsService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -15,25 +20,34 @@ import org.springframework.http.ResponseCookie;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 
-import javax.annotation.PostConstruct;
-import javax.servlet.http.Cookie;
-import javax.servlet.http.HttpServletRequest;
+import jakarta.annotation.PostConstruct;
+import jakarta.servlet.http.Cookie;
+import jakarta.servlet.http.HttpServletRequest;
 import java.time.Duration;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.regex.Pattern;
 
 @Service
 public class AuthService {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(AuthService.class);
+    private static final Pattern EMAIL_PATTERN = Pattern.compile("^[A-Za-z0-9._%+\\-]+@[A-Za-z0-9.\\-]+\\.[A-Za-z]{2,}$");
 
     private final AuthProperties authProperties;
     private final AuthUserRepository authUserRepository;
+    private final UserRepository userRepository;
+    private final SettingsService settingsService;
     private final ConcurrentHashMap<String, SessionRecord> sessions = new ConcurrentHashMap<String, SessionRecord>();
 
-    public AuthService(AuthProperties authProperties, AuthUserRepository authUserRepository) {
+    public AuthService(AuthProperties authProperties, 
+                       AuthUserRepository authUserRepository,
+                       UserRepository userRepository,
+                       SettingsService settingsService) {
         this.authProperties = authProperties;
         this.authUserRepository = authUserRepository;
+        this.userRepository = userRepository;
+        this.settingsService = settingsService;
     }
 
     @PostConstruct
@@ -58,19 +72,77 @@ public class AuthService {
     }
 
     public AuthenticatedUser login(AuthLoginRequest request) {
-        String username = ValidationSupport.requireNotBlank(request.getUsername(), "Username is required");
-        String password = ValidationSupport.requireNotBlank(request.getPassword(), "Password is required");
+        String username = ValidationSupport.requireNotBlank(request.getUsername(), "用户名不能为空");
+        String password = ValidationSupport.requireNotBlank(request.getPassword(), "密码不能为空");
         AuthUser user = authUserRepository.findByUsername(username);
-        if (user == null || !user.isEnabled() || !PasswordHashSupport.matches(password, user.getPasswordHash())) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid username or password");
+        boolean passwordMatch = false;
+        if (user != null && user.isEnabled()) {
+            try {
+                passwordMatch = PasswordHashSupport.matches(password, user.getPasswordHash());
+            } catch (IllegalArgumentException ignored) {
+                // password too short — treat as mismatch, don't leak validation details
+            }
+        }
+        if (!passwordMatch) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "用户名或密码错误");
         }
 
         authUserRepository.updateLastLogin(user.getId(), TimeSupport.nowDateTime());
         return toAuthenticatedUser(user);
     }
 
+    public AuthenticatedUser register(AuthRegisterRequest request) {
+        String username = ValidationSupport.requireNotBlank(request.getUsername(), "用户名不能为空");
+        String password = ValidationSupport.requireNotBlank(request.getPassword(), "密码不能为空");
+        String confirmPassword = ValidationSupport.requireNotBlank(request.getConfirmPassword(), "确认密码不能为空");
+        String displayName = ValidationSupport.isBlank(request.getDisplayName()) ? username : request.getDisplayName().trim();
+        String email = request.getEmail() == null ? "" : request.getEmail().trim();
+
+        if (!ValidationSupport.isBlank(email) && !EMAIL_PATTERN.matcher(email).matches()) {
+            throw new IllegalArgumentException("邮箱格式不正确");
+        }
+        if (password.length() < 10) {
+            throw new IllegalArgumentException("密码长度不能少于10位");
+        }
+        if (!password.equals(confirmPassword)) {
+            throw new IllegalArgumentException("两次输入的密码不一致");
+        }
+        if (authUserRepository.findByUsername(username) != null) {
+            throw new IllegalArgumentException("该用户名已被注册");
+        }
+
+        SettingsData settings = settingsService.getSettings();
+        if (Boolean.FALSE.equals(settings.registrationOpen)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "系统已关闭注册");
+        }
+
+        AuthUser user = new AuthUser();
+        user.setUsername(username);
+        user.setDisplayName(displayName);
+        user.setEmail(email);
+        user.setPasswordHash(PasswordHashSupport.hash(password));
+        user.setRole("USER");
+        user.setEnabled(true);
+        authUserRepository.save(user);
+
+        // Link to business user table
+        UserItem businessUser = new UserItem();
+        businessUser.setUsername(username);
+        businessUser.setEmail(email);
+        businessUser.setBalance("¥0.00");
+        businessUser.setGroup(settings.defaultGroup != null ? settings.defaultGroup : "默认组");
+        businessUser.setRole("用户");
+        businessUser.setStatus("正常");
+        businessUser.setTime(TimeSupport.today());
+        userRepository.save(businessUser);
+
+        return toAuthenticatedUser(user);
+    }
+
     public String openSession(AuthenticatedUser user) {
         purgeExpiredSessions();
+        // Invalidate any existing sessions for this user (prevents session fixation)
+        sessions.entrySet().removeIf(entry -> user.getId().equals(entry.getValue().userId));
         String token = UUID.randomUUID().toString().replace("-", "");
         sessions.put(token, new SessionRecord(user.getId(), expiresAt()));
         return token;
@@ -136,15 +208,15 @@ public class AuthService {
 
         AuthUser user = new AuthUser();
         user.setUsername(username.trim());
-        user.setDisplayName(ValidationSupport.requireNotBlank(displayName, "Display name is required"));
-        user.setEmail(ValidationSupport.requireNotBlank(email, "Email is required"));
+        user.setDisplayName(ValidationSupport.requireNotBlank(displayName, "显示名称不能为空"));
+        user.setEmail(ValidationSupport.requireNotBlank(email, "邮箱不能为空"));
         user.setPasswordHash(PasswordHashSupport.hash(password));
         user.setRole(role);
         user.setEnabled(true);
         authUserRepository.save(user);
 
         if ("change-me-before-public-deploy".equals(password)) {
-            LOGGER.warn("Bootstrapped {} user with the default password. Change FIRSTAPI_{}_PASSWORD before public deployment.", username, role);
+            LOGGER.warn("用户 {} 仍在使用默认密码。公网部署前请修改 FIRSTAPI_{}_PASSWORD。", username, role);
         }
     }
 

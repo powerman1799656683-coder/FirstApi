@@ -33,7 +33,7 @@ public class IpRepository extends JdbcListRepository<IpItem> {
         return Arrays.asList(
                 new IpItem(1L, "Tokyo-1", "SOCKS5", "10.0.0.1:9000", "日本", "18", "42ms", "正常"),
                 new IpItem(2L, "Singapore-2", "HTTP", "10.0.0.2:9001", "新加坡", "12", "58ms", "正常"),
-                new IpItem(3L, "LosAngeles-1", "SOCKS5", "10.0.0.3:9002", "美国", "5", "132ms", "告警")
+                new IpItem(3L, "LosAngeles-1", "SOCKS5", "10.0.0.3:9002", "美国", "5", "132ms", "警告")
         );
     }
 

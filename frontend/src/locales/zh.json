@@ -1,0 +1,42 @@
+{
+    "common": {
+        "system_overview": "系统概览与统计数据",
+        "balance": "余额",
+        "logout": "安全登出",
+        "profile": "个人设置",
+        "settings": "全局配置",
+        "current_user": "当前登录",
+        "nav": {
+            "monitor": "监控中心",
+            "monitor_system": "系统监控",
+            "monitor_accounts": "数据监控",
+            "users": "用户管理",
+            "groups": "分组管理",
+            "subscriptions": "订阅管理",
+            "accounts": "账号管理",
+            "announcements": "公告",
+            "ips": "IP 管理",
+            "system_settings": "系统设置",
+            "my_account": "我的账户",
+            "api_keys": "API 密钥",
+            "usage_records": "使用记录",
+            "my_subscription": "我的订阅",
+            "my_profile": "个人资料",
+            "sign_out": "退出登录"
+        }
+    },
+    "login": {
+        "welcome": "欢迎回来",
+        "subtitle": "登录您的账户以继续",
+        "username": "用户名",
+        "password": "密码",
+        "username_placeholder": "请输入用户名",
+        "password_placeholder": "请输入密码",
+        "login_button": "立即登录",
+        "verifying": "验证中...",
+        "no_account": "还没有账户?",
+        "register_now": "免费注册",
+        "error_required": "请输入用户名和密码",
+        "error_failed": "登录失败，请检查您的凭据"
+    }
+}

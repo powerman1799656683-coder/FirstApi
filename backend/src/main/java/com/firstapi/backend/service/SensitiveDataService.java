@@ -5,7 +5,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
-import javax.annotation.PostConstruct;
+import jakarta.annotation.PostConstruct;
 import javax.crypto.Cipher;
 import javax.crypto.spec.GCMParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
@@ -35,7 +35,7 @@ public class SensitiveDataService {
     public void init() {
         this.keySpec = new SecretKeySpec(sha256(properties.getDataSecret()), "AES");
         if ("local-dev-data-secret-change-me".equals(properties.getDataSecret())) {
-            LOGGER.warn("Using the default data encryption secret. Set FIRSTAPI_DATA_SECRET before public deployment.");
+            LOGGER.warn("当前仍在使用默认数据加密密钥。公网部署前请设置 FIRSTAPI_DATA_SECRET。");
         }
     }
 
@@ -54,7 +54,7 @@ public class SensitiveDataService {
                     + "."
                     + Base64.getUrlEncoder().withoutPadding().encodeToString(encrypted);
         } catch (GeneralSecurityException ex) {
-            throw new IllegalStateException("Unable to protect sensitive data", ex);
+            throw new IllegalStateException("敏感数据加密失败", ex);
         }
     }
 
@@ -64,7 +64,7 @@ public class SensitiveDataService {
         }
         String[] parts = value.substring(PREFIX.length()).split("\\.");
         if (parts.length != 2) {
-            throw new IllegalStateException("Stored secret has an invalid format");
+            throw new IllegalStateException("已存储密文格式无效");
         }
         try {
             byte[] iv = Base64.getUrlDecoder().decode(parts[0]);
@@ -73,7 +73,7 @@ public class SensitiveDataService {
             cipher.init(Cipher.DECRYPT_MODE, keySpec, new GCMParameterSpec(GCM_TAG_BITS, iv));
             return new String(cipher.doFinal(cipherText), StandardCharsets.UTF_8);
         } catch (GeneralSecurityException ex) {
-            throw new IllegalStateException("Unable to reveal sensitive data", ex);
+            throw new IllegalStateException("敏感数据解密失败", ex);
         }
     }
 
@@ -82,7 +82,7 @@ public class SensitiveDataService {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
             return digest.digest(input.getBytes(StandardCharsets.UTF_8));
         } catch (GeneralSecurityException ex) {
-            throw new IllegalStateException("Unable to initialize data encryption", ex);
+            throw new IllegalStateException("初始化数据加密失败", ex);
         }
     }
 }

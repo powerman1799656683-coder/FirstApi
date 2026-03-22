@@ -55,3 +55,33 @@ On first startup the backend creates:
 - one `USER` account only if `FIRSTAPI_USER_ENABLED=true` and `FIRSTAPI_USER_PASSWORD` is set
 
 After the first bootstrap, credentials live in MySQL and can be changed from the profile page.
+
+## Relay smoke test
+
+Before testing the public relay endpoint:
+
+1. Insert or create a platform API key in `api_keys`.
+2. Insert an upstream account in `accounts` with encrypted `credential`.
+3. Leave `accounts.base_url` blank to use the official default provider URL, or set it to a compatible gateway base URL.
+
+Non-stream test:
+
+```powershell
+curl.exe http://127.0.0.1:8080/v1/chat/completions `
+  -H "Authorization: Bearer sk-firstapi-local" `
+  -H "Content-Type: application/json" `
+  -d "{\"model\":\"gpt-4o-mini\",\"messages\":[{\"role\":\"user\",\"content\":\"Reply with ok\"}]}"
+```
+
+Expected: `200 OK` and an OpenAI-style JSON body with `choices[0].message.content`.
+
+Stream test:
+
+```powershell
+curl.exe -N http://127.0.0.1:8080/v1/chat/completions `
+  -H "Authorization: Bearer sk-firstapi-local" `
+  -H "Content-Type: application/json" `
+  -d "{\"model\":\"gpt-4o-mini\",\"stream\":true,\"messages\":[{\"role\":\"user\",\"content\":\"Count to three\"}]}"
+```
+
+Expected: multiple `data:` lines followed by `data: [DONE]`.

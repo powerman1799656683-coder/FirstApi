@@ -28,17 +28,17 @@ public class SubscriptionController {
 
     @PostMapping
     public ApiResponse<SubscriptionItem> create(@RequestBody SubscriptionItem.Request req) {
-        return ApiResponse.ok("created", service.create(req));
+        return ApiResponse.ok("创建成功", service.create(req));
     }
 
     @PutMapping("/{id}")
     public ApiResponse<SubscriptionItem> update(@PathVariable Long id, @RequestBody SubscriptionItem.Request req) {
-        return ApiResponse.ok("updated", service.update(id, req));
+        return ApiResponse.ok("更新成功", service.update(id, req));
     }
 
     @DeleteMapping("/{id}")
     public ApiResponse<Boolean> delete(@PathVariable Long id) {
         service.delete(id);
-        return ApiResponse.ok("deleted", true);
+        return ApiResponse.ok("删除成功", true);
     }
 }

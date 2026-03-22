@@ -1,9 +1,12 @@
 import fs from 'node:fs';
 import process from 'node:process';
+import crypto from 'node:crypto';
 import { chromium } from 'playwright-core';
 import mysql from 'mysql2/promise';
 
 const appBaseUrl = process.env.APP_BASE_URL || 'http://127.0.0.1:8081';
+const e2eAdminUsername = process.env.UI_E2E_ADMIN_USERNAME || 'e2e_admin';
+const e2eAdminPassword = process.env.UI_E2E_ADMIN_PASSWORD || 'e2e-admin-pass-123';
 const chromeCandidates = [
   process.env.CHROME_PATH,
   'C:/Program Files/Google/Chrome/Application/chrome.exe',
@@ -31,6 +34,7 @@ const browser = await chromium.launch({
 const page = await browser.newPage({ baseURL: appBaseUrl });
 const stamp = Date.now().toString();
 const results = [];
+const stepFilter = process.env.UI_E2E_STEP ? new RegExp(process.env.UI_E2E_STEP, 'i') : null;
 
 function assert(condition, message) {
   if (!condition) {
@@ -162,7 +166,53 @@ async function expectModalError(text) {
   assert(message && message.includes(text), `Expected modal error to include "${text}", got: ${message}`);
 }
 
+function hashPassword(password) {
+  const iterations = 120000;
+  const salt = crypto.randomBytes(16);
+  const derived = crypto.pbkdf2Sync(password, salt, iterations, 32, 'sha256');
+  return `pbkdf2_sha256$${iterations}$${salt.toString('base64')}$${derived.toString('base64')}`;
+}
+
+async function ensureE2eAdminUser() {
+  const passwordHash = hashPassword(e2eAdminPassword);
+  await execute(
+    `insert into auth_users (username, email, display_name, password_hash, role_name, enabled, last_login)
+     values (?, ?, ?, ?, 'ADMIN', 1, null)
+     on duplicate key update
+       email = values(email),
+       display_name = values(display_name),
+       password_hash = values(password_hash),
+       role_name = 'ADMIN',
+       enabled = 1`,
+    [e2eAdminUsername, `${e2eAdminUsername}@example.com`, 'E2E Admin', passwordHash]
+  );
+}
+
+async function ensureLoggedIn() {
+  await ensureE2eAdminUser();
+
+  const sessionResp = await page.request.get(`${appBaseUrl}/api/auth/session`);
+  if (sessionResp.ok()) {
+    return;
+  }
+
+  const loginResp = await page.request.post(`${appBaseUrl}/api/auth/login`, {
+    data: {
+      username: e2eAdminUsername,
+      password: e2eAdminPassword
+    }
+  });
+  assert(loginResp.ok(), `Login failed for E2E bootstrap: HTTP ${loginResp.status()}`);
+
+  const verifyResp = await page.request.get(`${appBaseUrl}/api/auth/session`);
+  assert(verifyResp.ok(), 'E2E bootstrap login did not establish session cookie');
+}
+
 async function runStep(name, fn) {
+  if (stepFilter && !stepFilter.test(name)) {
+    results.push({ page: name, result: 'SKIP', details: `Filtered by UI_E2E_STEP=${process.env.UI_E2E_STEP}` });
+    return;
+  }
   try {
     await fn();
     results.push({ page: name, result: 'PASS', details: '' });
@@ -170,6 +220,8 @@ async function runStep(name, fn) {
     results.push({ page: name, result: 'FAIL', details: error.message });
   }
 }
+
+await ensureLoggedIn();
 
 await runStep('Dashboard', async () => {
   await gotoPath('/');
@@ -247,8 +299,8 @@ await runStep('Users Pagination', async () => {
     await searchByTestId('users-search', prefix);
     await rowByText(`${prefix}-21`);
     await ensureNoVisibleRow(`${prefix}-01`);
-    assert(await page.getByTestId('users-page-2').isVisible(), 'Users page 2 button should be visible');
-    await page.getByTestId('users-page-2').click();
+    assert(await page.getByTestId('users-page-3').isVisible(), 'Users page 3 button should be visible');
+    await page.getByTestId('users-page-3').click();
     await rowByText(`${prefix}-01`);
   } finally {
     await execute('delete from users where username like ?', [`${prefix}%`]);
@@ -268,12 +320,12 @@ await runStep('Users Pagination Delete Boundary', async () => {
 
     await gotoPath('/users', 'table');
     await searchByTestId('users-search', prefix);
-    await page.getByTestId('users-page-2').click();
+    await page.getByTestId('users-page-3').click();
     const row = await rowByText(`${prefix}-01`);
     await clickAction(row, 2);
     await waitForDb(async () => Number(await scalar('select count(*) from users where username like ?', [`${prefix}%`])) === 20, 'Users pagination delete not written to MySQL');
     await rowByText(`${prefix}-21`);
-    assert(await page.getByTestId('users-page-2').count() === 0, 'Users page 2 should disappear after deleting the last item on page 2');
+    assert(await page.getByTestId('users-page-3').count() === 0, 'Users page 3 should disappear after deleting the last item on page 3');
   } finally {
     await execute('delete from users where username like ?', [`${prefix}%`]);
   }
@@ -368,8 +420,8 @@ await runStep('Subscriptions Pagination', async () => {
     await searchByTestId('subscriptions-search', prefix);
     await rowByText(`${prefix}-21@example.com`);
     await ensureNoVisibleRow(`${prefix}-01@example.com`);
-    assert(await page.getByTestId('subscriptions-page-2').isVisible(), 'Subscriptions page 2 button should be visible');
-    await page.getByTestId('subscriptions-page-2').click();
+    assert(await page.getByTestId('subscriptions-page-3').isVisible(), 'Subscriptions page 3 button should be visible');
+    await page.getByTestId('subscriptions-page-3').click();
     await rowByText(`${prefix}-01@example.com`);
   } finally {
     await execute('delete from subscriptions where user_name like ?', [`${prefix}%`]);
@@ -389,12 +441,12 @@ await runStep('Subscriptions Pagination Delete Boundary', async () => {
 
     await gotoPath('/subscriptions', 'table');
     await searchByTestId('subscriptions-search', prefix);
-    await page.getByTestId('subscriptions-page-2').click();
+    await page.getByTestId('subscriptions-page-3').click();
     const row = await rowByText(`${prefix}-01@example.com`);
     await clickAction(row, 2);
     await waitForDb(async () => Number(await scalar('select count(*) from subscriptions where user_name like ?', [`${prefix}%`])) === 20, 'Subscriptions pagination delete not written to MySQL');
     await rowByText(`${prefix}-21@example.com`);
-    assert(await page.getByTestId('subscriptions-page-2').count() === 0, 'Subscriptions page 2 should disappear after deleting the last item on page 2');
+    assert(await page.getByTestId('subscriptions-page-3').count() === 0, 'Subscriptions page 3 should disappear after deleting the last item on page 3');
   } finally {
     await execute('delete from subscriptions where user_name like ?', [`${prefix}%`]);
   }
@@ -444,6 +496,100 @@ await runStep('Accounts CRUD + Search + Validation + Recovery', async () => {
   await waitForRowGone(updateMarker);
   await waitForDb(async () => Number(await scalar('select count(*) from accounts where name = ?', [updateMarker])) === 0, 'Accounts delete not written to MySQL');
 });
+
+await runStep('Accounts OAuth Wizard Flow', async () => {
+  const marker = `ui-account-oauth-${stamp}`;
+  const mockCode = `oauth-code-${stamp}`;
+  let oauthStartData = null;
+
+  const oauthStartHandler = async (route) => {
+    const response = await route.fetch();
+    const body = await response.text();
+    try {
+      const payload = JSON.parse(body);
+      oauthStartData = payload?.data || null;
+    } catch {
+      oauthStartData = null;
+    }
+    await route.fulfill({ response, body });
+  };
+
+  const oauthExchangeHandler = async (route) => {
+    const body = route.request().postData() || '{}';
+    const payload = JSON.parse(body);
+    assert(oauthStartData && oauthStartData.sessionId, 'OAuth start response should include sessionId before exchange');
+    assert(payload.sessionId === oauthStartData.sessionId, 'OAuth exchange request should carry sessionId from start');
+    assert(payload.state === oauthStartData.state, 'OAuth exchange request should carry state from start');
+    assert(payload.code === mockCode, 'OAuth exchange request should carry pasted code');
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        success: true,
+        message: 'ok',
+        data: {
+          credentialRef: oauthStartData.sessionId,
+          credentialMask: 'sk-ant-ui****flow',
+          authMethod: 'OAuth',
+          providerAccount: { provider: 'Anthropic', subject: 'org_ui_flow' },
+          expiresAt: null
+        }
+      })
+    });
+  };
+
+  await page.route('**/api/admin/accounts/oauth/start', oauthStartHandler);
+  await page.route('**/api/admin/accounts/oauth/exchange', oauthExchangeHandler);
+  try {
+    await gotoPath('/accounts', 'table');
+    const modal = await openModalFromToolbar();
+
+    await modal.locator('input').nth(0).fill(marker);
+    await modal.getByTestId('accounts-wizard-next').click();
+
+    const blockedReason = await page.getByTestId('wizard-next-blocked-reason').textContent();
+    assert(blockedReason && blockedReason.includes('OAuth'), `Expected blocked reason to mention OAuth, got: ${blockedReason}`);
+
+    await page.getByTestId('accounts-oauth-start').click();
+    await page.getByTestId('accounts-oauth-url').waitFor({ state: 'visible' });
+    assert(oauthStartData && oauthStartData.sessionId, 'OAuth start should return session metadata');
+
+    const authUrl = await page.getByTestId('accounts-oauth-url').inputValue();
+    assert(authUrl.includes('client_id='), 'OAuth authorizationUrl should include client_id');
+    assert(authUrl.includes('code_challenge='), 'OAuth authorizationUrl should include code_challenge');
+
+    await execute(
+      'update account_oauth_sessions set status_name = ?, encrypted_credential = ?, credential_mask = ?, provider_subject = ?, exchanged_at = now() where session_id = ?',
+      ['EXCHANGED', `enc-oauth-${stamp}`, 'sk-ant-ui****flow', 'org_ui_flow', oauthStartData.sessionId]
+    );
+
+    await page.getByTestId('accounts-oauth-code').fill(mockCode);
+    await page.getByTestId('accounts-oauth-exchange').click();
+    await page.getByTestId('accounts-oauth-success').waitFor({ state: 'visible' });
+
+    await modal.getByTestId('accounts-wizard-next').click();
+    await modal.getByTestId('accounts-wizard-next').click();
+    await modal.getByTestId('accounts-wizard-save').click();
+
+    await rowByText(marker);
+    await waitForDb(async () => Number(await scalar(
+      'select count(*) from accounts where name = ? and auth_method = ? and credential is not null',
+      [marker, 'OAuth']
+    )) === 1, 'OAuth account create not written to MySQL');
+    await waitForDb(async () => Number(await scalar(
+      'select count(*) from account_oauth_sessions where session_id = ? and status_name = ?',
+      [oauthStartData.sessionId, 'CONSUMED']
+    )) === 1, 'OAuth credentialRef should be consumed after account create');
+  } finally {
+    await page.unroute('**/api/admin/accounts/oauth/start', oauthStartHandler);
+    await page.unroute('**/api/admin/accounts/oauth/exchange', oauthExchangeHandler);
+    await execute('delete from accounts where name = ?', [marker]);
+    if (oauthStartData?.sessionId) {
+      await execute('delete from account_oauth_sessions where session_id = ?', [oauthStartData.sessionId]);
+    }
+  }
+});
+
 await runStep('Announcements CRUD + Search', async () => {
   const createMarker = `ui-ann-${stamp}`;
   const updateMarker = `ui-ann-up-${stamp}`;
@@ -543,121 +689,6 @@ await runStep('IPs Batch Test All', async () => {
     await execute('delete from ips where name like ?', [`${prefix}%`]);
   }
 });
-await runStep('Redemptions CRUD + Search', async () => {
-  const createMarker = `ui-redemption-${stamp}`;
-  const updateMarker = `ui-redemption-up-${stamp}`;
-  await gotoPath('/redemptions', 'table');
-  let modal = await openModalFromToolbar();
-  await fillInputs(modal, [
-    { kind: 'input', selector: 'input', index: 0, value: createMarker },
-    { kind: 'input', selector: 'input', index: 1, value: '$66.00' },
-    { kind: 'input', selector: 'input', index: 2, value: '1' },
-    { kind: 'input', selector: 'input', index: 3, value: '2' }
-  ]);
-  await submitModal();
-  await rowByText(createMarker);
-  await waitForDb(async () => Number(await scalar('select count(*) from redemptions where name = ?', [createMarker])) === 1, 'Redemptions create not written to MySQL');
-
-  await searchGeneric(createMarker, true);
-  await rowByText(createMarker);
-  await searchGeneric('missing-redemption-marker', true);
-  await ensureNoVisibleRow(createMarker);
-  await searchGeneric('', true);
-  await rowByText(createMarker);
-
-  let row = await rowByText(createMarker);
-  await clickAction(row, 0);
-  modal = page.getByTestId('modal-content');
-  await modal.locator('input').nth(0).fill(updateMarker);
-  await modal.locator('input').nth(1).fill('$88.00');
-  await modal.locator('select').nth(1).selectOption({ index: 2 });
-  await submitModal();
-  await rowByText(updateMarker);
-  await waitForDb(async () => Number(await scalar('select count(*) from redemptions where name = ? and value_text = ?', [updateMarker, '$88.00'])) === 1, 'Redemptions update not written to MySQL');
-
-  row = await rowByText(updateMarker);
-  await clickAction(row, 1);
-  await waitForRowGone(updateMarker);
-  await waitForDb(async () => Number(await scalar('select count(*) from redemptions where name = ?', [updateMarker])) === 0, 'Redemptions delete not written to MySQL');
-});
-
-await runStep('Redemptions Batch Generate', async () => {
-  const batchMarker = `ui-redemption-batch-${stamp}`;
-  try {
-    await gotoPath('/redemptions', 'table');
-    const modal = await openModalFromToolbar();
-    await fillInputs(modal, [
-      { kind: 'input', selector: 'input', index: 0, value: batchMarker },
-      { kind: 'input', selector: 'input', index: 1, value: '$11.00' },
-      { kind: 'input', selector: 'input', index: 2, value: '3' },
-      { kind: 'input', selector: 'input', index: 3, value: '2' }
-    ]);
-    await submitModal();
-    await waitForDb(async () => Number(await scalar('select count(*) from redemptions where name = ?', [batchMarker])) === 3, 'Redemptions batch create not written to MySQL');
-    await searchGeneric(batchMarker, true);
-    assert((await rowCountByText(batchMarker)) === 3, 'Expected 3 redemption rows after batch generation');
-  } finally {
-    await execute('delete from redemptions where name = ?', [batchMarker]);
-  }
-});
-await runStep('Promos CRUD + Search + Duplicate + Recovery', async () => {
-  const createMarker = `UIPROMO${stamp}`;
-  const recoveryMarker = `UIPROMOREC${stamp}`;
-  const updateMarker = `UIPROMOUP${stamp}`;
-  await gotoPath('/promos', 'table');
-  let modal = await openModalFromToolbar();
-  await fillInputs(modal, [
-    { kind: 'input', selector: 'input', index: 0, value: createMarker },
-    { kind: 'input', selector: 'input', index: 1, value: '$9.90' },
-    { kind: 'input', selector: 'input', index: 2, value: '0 / 100' },
-    { kind: 'input', selector: 'input', index: 3, value: '2026/12/31' }
-  ]);
-  await modal.locator('button.btn-primary').last().click();
-  await rowByText(createMarker);
-  await waitForDb(async () => Number(await scalar('select count(*) from promos where code = ?', [createMarker])) === 1, 'Promos create not written to MySQL');
-
-  await searchByTestId('promos-search', createMarker, true);
-  await rowByText(createMarker);
-  await searchByTestId('promos-search', 'missing-promo-marker', true);
-  await ensureNoVisibleRow(createMarker);
-  await searchByTestId('promos-search', '', true);
-  await rowByText(createMarker);
-
-  modal = await openModalFromToolbar();
-  await fillInputs(modal, [
-    { kind: 'input', selector: 'input', index: 0, value: createMarker },
-    { kind: 'input', selector: 'input', index: 1, value: '$5.50' },
-    { kind: 'input', selector: 'input', index: 2, value: '0 / 10' },
-    { kind: 'input', selector: 'input', index: 3, value: '2026/12/31' }
-  ]);
-  await modal.locator('button.btn-primary').last().click();
-  await expectModalError('Promo code already exists');
-  await waitForDb(async () => Number(await scalar('select count(*) from promos where code = ?', [createMarker])) === 1, 'Duplicate promo should not create a second row');
-  await modal.locator('input').nth(0).fill(recoveryMarker);
-  await modal.locator('button.btn-primary').last().click();
-  await rowByText(recoveryMarker);
-  await waitForDb(async () => Number(await scalar('select count(*) from promos where code = ?', [recoveryMarker])) === 1, 'Promo recovery create not written to MySQL');
-
-  let recoveryRow = await rowByText(recoveryMarker);
-  await clickAction(recoveryRow, 1);
-  await waitForRowGone(recoveryMarker);
-  await waitForDb(async () => Number(await scalar('select count(*) from promos where code = ?', [recoveryMarker])) === 0, 'Promo recovery cleanup not written to MySQL');
-
-  let row = await rowByText(createMarker);
-  await clickAction(row, 0);
-  modal = page.getByTestId('modal-content');
-  await modal.locator('input').nth(0).fill(updateMarker);
-  await modal.locator('input').nth(1).fill('$8.80');
-  await modal.locator('input').nth(2).fill('1 / 100');
-  await modal.locator('button.btn-primary').last().click();
-  await rowByText(updateMarker);
-  await waitForDb(async () => Number(await scalar('select count(*) from promos where code = ? and value_text = ?', [updateMarker, '$8.80'])) === 1, 'Promos update not written to MySQL');
-
-  row = await rowByText(updateMarker);
-  await clickAction(row, 1);
-  await waitForRowGone(updateMarker);
-  await waitForDb(async () => Number(await scalar('select count(*) from promos where code = ?', [updateMarker])) === 0, 'Promos delete not written to MySQL');
-});
 await runStep('MyApiKeys Actions + Search', async () => {
   const createMarker = `ui-key-${stamp}`;
   await gotoPath('/my-api-keys', 'table');
@@ -725,14 +756,6 @@ await runStep('Profile Update + Reload + 2FA', async () => {
   const badgeText = await page.getByTestId('profile-2fa-badge').textContent();
   assert(badgeText && badgeText.includes('Enabled'), 'Profile 2FA badge should persist after reload');
 });
-await runStep('MyRedemption Action', async () => {
-  const marker = `UI-REDEEM-${stamp}`;
-  await gotoPath('/my-redemption', '[data-testid="my-redemption-code"]');
-  await page.getByTestId('my-redemption-code').fill(marker);
-  await page.getByTestId('my-redemption-submit').click();
-  await waitForDb(async () => Number(await scalar('select count(*) from my_redemption where id = 1 and history_json like ?', [`%${marker}%`])) === 1, 'MyRedemption action not written to MySQL');
-});
-
 await runStep('MySubscription Action', async () => {
   await gotoPath('/my-subscription', '[data-testid="my-subscription-renew"]');
   const beforeLength = Number(await scalar('select char_length(history_json) from my_subscription where id = 1'));
@@ -805,47 +828,6 @@ await runStep('Users Unicode Edge Data', async () => {
   await searchByTestId('users-search', '');
 });
 
-await runStep('Promos Duplicate Submit Guard', async () => {
-  const marker = `UIPROMODUP${stamp}`;
-  try {
-    await gotoPath('/promos', 'table');
-    const modal = await openModalFromToolbar();
-    await fillInputs(modal, [
-      { kind: 'input', selector: 'input', index: 0, value: marker },
-      { kind: 'input', selector: 'input', index: 1, value: '$6.60' },
-      { kind: 'input', selector: 'input', index: 2, value: '0 / 20' },
-      { kind: 'input', selector: 'input', index: 3, value: '2026/12/31' }
-    ]);
-    const saveButton = modal.locator('button.btn-primary').last();
-    await saveButton.evaluate((node) => { node.click(); node.click(); });
-    await rowByText(marker);
-    await waitForDb(async () => Number(await scalar('select count(*) from promos where code = ?', [marker])) === 1, 'Promos duplicate submit should only create one row');
-  } finally {
-    await execute('delete from promos where code = ?', [marker]);
-  }
-});
-
-await runStep('Redemptions Duplicate Submit Guard', async () => {
-  const marker = `ui-redemption-dup-${stamp}`;
-  try {
-    await gotoPath('/redemptions', 'table');
-    const modal = await openModalFromToolbar();
-    await fillInputs(modal, [
-      { kind: 'input', selector: 'input', index: 0, value: marker },
-      { kind: 'input', selector: 'input', index: 1, value: '$12.00' },
-      { kind: 'input', selector: 'input', index: 2, value: '2' },
-      { kind: 'input', selector: 'input', index: 3, value: '1' }
-    ]);
-    const saveButton = modal.locator('.btn-primary').last();
-    await saveButton.evaluate((node) => { node.click(); node.click(); });
-    await waitForDb(async () => Number(await scalar('select count(*) from redemptions where name = ?', [marker])) === 2, 'Redemptions duplicate submit should only create the requested batch size once');
-    await searchGeneric(marker, true);
-    assert((await rowCountByText(marker)) === 2, 'Expected exactly 2 redemption rows after duplicate click guard');
-  } finally {
-    await execute('delete from redemptions where name = ?', [marker]);
-  }
-});
-
 await runStep('MyApiKeys Duplicate Submit Guard', async () => {
   const marker = `ui-key-dup-${stamp}`;
   try {
@@ -868,38 +850,6 @@ await runStep('MySubscription Duplicate Renew Guard', async () => {
   const renewButton = page.getByTestId('my-subscription-renew');
   await renewButton.evaluate((node) => { node.click(); node.click(); });
   await waitForDb(async () => Number(await scalar('select json_length(history_json) from my_subscription where id = 1')) === beforeCount + 1, 'MySubscription duplicate renew should append exactly one history item');
-});
-
-await runStep('Redemptions Validation + Recovery', async () => {
-  const marker = `ui-redemption-recovery-${stamp}`;
-  try {
-    await gotoPath('/redemptions', 'table');
-    const modal = await openModalFromToolbar();
-    await fillInputs(modal, [
-      { kind: 'input', selector: 'input', index: 0, value: '' },
-      { kind: 'input', selector: 'input', index: 1, value: '' },
-      { kind: 'input', selector: 'input', index: 2, value: '0' },
-      { kind: 'input', selector: 'input', index: 3, value: '0' }
-    ]);
-    await submitModal();
-    await expectModalError('Redemption name is required');
-    await waitForDb(async () => Number(await scalar('select count(*) from redemptions where name = ?', [marker])) === 0, 'Invalid redemption submit should not write to MySQL');
-
-    await modal.locator('input').nth(0).fill(marker);
-    await modal.locator('input').nth(1).fill('$19.90');
-    await modal.locator('input').nth(2).fill('1');
-    await modal.locator('input').nth(3).fill('3');
-    await submitModal();
-    await rowByText(marker);
-    await waitForDb(async () => Number(await scalar('select count(*) from redemptions where name = ?', [marker])) === 1, 'Redemption recovery create not written to MySQL');
-
-    const row = await rowByText(marker);
-    await clickAction(row, 1);
-    await waitForRowGone(marker);
-    await waitForDb(async () => Number(await scalar('select count(*) from redemptions where name = ?', [marker])) === 0, 'Redemption recovery cleanup failed');
-  } finally {
-    await execute('delete from redemptions where name = ?', [marker]);
-  }
 });
 
 await runStep('MyApiKeys Validation + Recovery', async () => {
@@ -1025,32 +975,6 @@ await runStep('Profile Validation + Unicode + Long Text + Reload', async () => {
   assert((await page.getByTestId('profile-bio').inputValue()) === bio, 'Profile bio should persist after reload');
 });
 
-await runStep('Promos Delete Sweep', async () => {
-  const prefix = `UISWEEP${stamp}`;
-  try {
-    for (let i = 1; i <= 3; i += 1) {
-      await execute(
-        'insert into promos (code, type_name, value_text, usage_text, expiry_label, status_name) values (?, ?, ?, ?, ?, ?)',
-        [`${prefix}${i}`, 'Sweep', `$${i}.00`, '0 / 1', '2027/01/01', 'Active']
-      );
-    }
-
-    await gotoPath('/promos', 'table');
-    await searchByTestId('promos-search', prefix, true);
-    assert((await rowCountByText(prefix)) === 3, 'Expected 3 promo rows before delete sweep');
-
-    while ((await rowCountByText(prefix)) > 0) {
-      const row = page.locator('tbody tr', { hasText: prefix }).first();
-      await clickAction(row, 1);
-      await page.waitForTimeout(300);
-    }
-
-    await waitForDb(async () => Number(await scalar('select count(*) from promos where code like ?', [`${prefix}%`])) === 0, 'Promo delete sweep not written to MySQL');
-    await ensureNoVisibleRow(prefix);
-  } finally {
-    await execute('delete from promos where code like ?', [`${prefix}%`]);
-  }
-});
 console.table(results);
 
 const failed = results.filter((item) => item.result === 'FAIL');

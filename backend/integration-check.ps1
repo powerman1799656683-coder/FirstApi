@@ -55,7 +55,7 @@ function Assert-Contains($text, $needle, $message) {
 
 $requiredTables = @(
     'users', 'groups', 'subscriptions', 'accounts', 'announcements', 'ips',
-    'redemptions', 'promos', 'api_keys', 'settings', 'profiles', 'my_subscription', 'my_redemption'
+    'api_keys', 'settings', 'profiles', 'my_subscription'
 )
 try {
     $tables = Invoke-DbText 'show tables'
@@ -69,8 +69,8 @@ try {
 
 $spaRoutes = @(
     '/', '/monitor', '/users', '/groups', '/subscriptions', '/accounts', '/announcements', '/ips',
-    '/redemptions', '/promos', '/records', '/settings', '/my-api-keys', '/my-records',
-    '/my-subscription', '/my-redemption', '/profile'
+    '/records', '/settings', '/my-api-keys', '/my-records',
+    '/my-subscription', '/profile'
 )
 foreach ($route in $spaRoutes) {
     try {
@@ -140,9 +140,9 @@ try {
     $created = Invoke-Api 'Post' '/admin/subscriptions' @{ user=$createMarker; group='Claude Pro'; quota='200'; expiry='2026/12/31' }
     $id = $created.data.id
     if ([int](Invoke-DbScalar "select count(*) from subscriptions where user_name = '$createMarker'") -lt 1) { throw 'Subscriptions create not written to MySQL' }
-    if ([int](Invoke-DbScalar ('select count(*) from subscriptions where id = ' + $id + ' and usage_text = ''$0.00 / $200''')) -ne 1) { throw 'Subscriptions quota not written to MySQL' }
+    if ([int](Invoke-DbScalar ('select count(*) from subscriptions where id = ' + $id + ' and usage_text = ''¥0.00 / ¥200''')) -ne 1) { throw 'Subscriptions quota not written to MySQL' }
     Invoke-Api 'Put' "/admin/subscriptions/$id" @{ user=$updateMarker; group='Enterprise Gold'; quota='500'; status='ok' } | Out-Null
-    if ([int](Invoke-DbScalar ('select count(*) from subscriptions where id = ' + $id + ' and user_name = ''' + $updateMarker + ''' and usage_text = ''$0.00 / $500''')) -ne 1) { throw 'Subscriptions update not written to MySQL' }
+    if ([int](Invoke-DbScalar ('select count(*) from subscriptions where id = ' + $id + ' and user_name = ''' + $updateMarker + ''' and usage_text = ''¥0.00 / ¥500''')) -ne 1) { throw 'Subscriptions update not written to MySQL' }
     Invoke-Api 'Delete' "/admin/subscriptions/$id" | Out-Null
     if ([int](Invoke-DbScalar "select count(*) from subscriptions where id = $id") -ne 0) { throw 'Subscriptions delete not written to MySQL' }
     Add-Result 'Subscriptions' 'CRUD' 'PASS' "id=$id"
@@ -200,37 +200,6 @@ try {
 }
 
 try {
-    $createMarker = "itest-redemption-$suffix"
-    $updateMarker = "itest-redemption-updated-$suffix"
-    $created = Invoke-Api 'Post' '/admin/redemptions' @{ name=$createMarker; type='credit'; value='$66.00'; quantity=1; usageLimit=2 }
-    $item = $created.data[0]
-    $id = $item.id
-    if ([int](Invoke-DbScalar "select count(*) from redemptions where name = '$createMarker'") -lt 1) { throw 'Redemptions create not written to MySQL' }
-    Invoke-Api 'Put' "/admin/redemptions/$id" @{ name=$updateMarker; value='$88.00'; status='running' } | Out-Null
-    if ([int](Invoke-DbScalar ('select count(*) from redemptions where id = ' + $id + ' and name = ''' + $updateMarker + ''' and value_text = ''$88.00''')) -ne 1) { throw 'Redemptions update not written to MySQL' }
-    Invoke-Api 'Delete' "/admin/redemptions/$id" | Out-Null
-    if ([int](Invoke-DbScalar "select count(*) from redemptions where id = $id") -ne 0) { throw 'Redemptions delete not written to MySQL' }
-    Add-Result 'Redemptions' 'CRUD' 'PASS' "id=$id"
-} catch {
-    Add-Result 'Redemptions' 'CRUD' 'FAIL' $_.Exception.Message
-}
-
-try {
-    $createMarker = "ITESTPROMO$suffix"
-    $updateMarker = "ITESTPROMOUP$suffix"
-    $created = Invoke-Api 'Post' '/admin/promos' @{ code=$createMarker; value='$9.90'; type='signup'; usage='0 / 100'; expiry='2026/12/31'; status='running' }
-    $id = $created.data.id
-    if ([int](Invoke-DbScalar "select count(*) from promos where code = '$createMarker'") -lt 1) { throw 'Promos create not written to MySQL' }
-    Invoke-Api 'Put' "/admin/promos/$id" @{ code=$updateMarker; value='$8.80'; usage='1 / 100'; status='running' } | Out-Null
-    if ([int](Invoke-DbScalar ('select count(*) from promos where id = ' + $id + ' and code = ''' + $updateMarker + ''' and value_text = ''$8.80''')) -ne 1) { throw 'Promos update not written to MySQL' }
-    Invoke-Api 'Delete' "/admin/promos/$id" | Out-Null
-    if ([int](Invoke-DbScalar "select count(*) from promos where id = $id") -ne 0) { throw 'Promos delete not written to MySQL' }
-    Add-Result 'Promos' 'CRUD' 'PASS' "id=$id"
-} catch {
-    Add-Result 'Promos' 'CRUD' 'FAIL' $_.Exception.Message
-}
-
-try {
     $createMarker = "itest-key-$suffix"
     $created = Invoke-Api 'Post' '/user/api-keys' @{ name=$createMarker }
     $id = $created.data.id
@@ -268,17 +237,6 @@ try {
     Add-Result 'Profile' 'Update+2FA' 'PASS' 'profile persisted'
 } catch {
     Add-Result 'Profile' 'Update+2FA' 'FAIL' $_.Exception.Message
-}
-
-try {
-    $marker = "ITEST-REDEEM-$suffix"
-    $before = (Invoke-Api 'Get' '/user/redemption').data.history.Count
-    $after = Invoke-Api 'Post' '/user/redemption/redeem' @{ code=$marker }
-    if ($after.data.history.Count -lt ($before + 1)) { throw 'MyRedemption history count did not increase' }
-    Assert-Contains (Invoke-DbScalar 'select history_json from my_redemption where id = 1') $marker 'MyRedemption redeem not written to MySQL'
-    Add-Result 'MyRedemption' 'Redeem' 'PASS' 'history persisted'
-} catch {
-    Add-Result 'MyRedemption' 'Redeem' 'FAIL' $_.Exception.Message
 }
 
 try {

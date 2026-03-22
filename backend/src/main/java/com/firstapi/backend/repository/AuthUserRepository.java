@@ -67,9 +67,9 @@ public class AuthUserRepository {
             return statement;
         }, keyHolder);
 
-        Number key = keyHolder.getKey();
+        Long key = GeneratedKeySupport.extractId(keyHolder);
         if (key != null) {
-            user.setId(key.longValue());
+            user.setId(key);
         }
         return user;
     }
@@ -84,5 +84,14 @@ public class AuthUserRepository {
 
     public void updateLastLogin(Long id, String lastLogin) {
         jdbcTemplate.update("update `auth_users` set `last_login` = ? where `id` = ?", lastLogin, id);
+    }
+
+    public void updateByUsername(String username, String email, String displayName, String role) {
+        jdbcTemplate.update("update `auth_users` set `email` = ?, `display_name` = ?, `role_name` = ? where `username` = ?",
+                email, displayName, role, username);
+    }
+
+    public void deleteByUsername(String username) {
+        jdbcTemplate.update("delete from `auth_users` where `username` = ?", username);
     }
 }

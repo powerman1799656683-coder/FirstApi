@@ -1,80 +1,302 @@
 import React, { useState, useEffect } from 'react';
 import {
-    Box,
     Search,
     RotateCcw,
     Plus,
     ChevronDown,
-    ChevronLeft,
-    ChevronRight,
-    Edit2,
+    Edit3,
     Trash2,
-    Zap,
-    Globe,
-    Settings,
-    ShieldCheck
+    HelpCircle,
 } from 'lucide-react';
 import Modal from '../components/Modal';
+import StatusBadge from '../components/StatusBadge';
+import EmptyState from '../components/EmptyState';
+import Pagination from '../components/Pagination';
 import { api } from '../api';
+import Select from '../components/Select';
+
+const PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
+
+const PLATFORM_CONFIG = {
+    Anthropic: { color: '#f97316', bg: 'rgba(249, 115, 22, 0.1)', border: 'rgba(249, 115, 22, 0.25)', icon: '*' },
+    OpenAI: { color: '#10b981', bg: 'rgba(16, 185, 129, 0.1)', border: 'rgba(16, 185, 129, 0.25)', icon: 'o' },
+    Gemini: { color: '#3b82f6', bg: 'rgba(59, 130, 246, 0.1)', border: 'rgba(59, 130, 246, 0.25)', icon: '+' },
+    Antigravity: { color: '#f97316', bg: 'rgba(249, 115, 22, 0.1)', border: 'rgba(249, 115, 22, 0.25)', icon: '*' },
+};
+
+const ACCOUNT_TYPE_MAP = {
+    Anthropic: ['Claude Code', 'Claude Max'],
+    OpenAI: ['ChatGPT Plus', 'ChatGPT Pro'],
+    Gemini: ['Gemini Advanced'],
+    Antigravity: ['Standard'],
+};
+
+function resolveAccountTypes(platform) {
+    return ACCOUNT_TYPE_MAP[platform] || ['Standard'];
+}
+
+const BILLING_TYPE_CONFIG = {
+    '标准（余额）': { color: '#10b981', bg: 'rgba(16, 185, 129, 0.1)', border: 'rgba(16, 185, 129, 0.25)' },
+    '订阅（配额）': { color: '#f97316', bg: 'rgba(249, 115, 22, 0.1)', border: 'rgba(249, 115, 22, 0.25)' },
+};
+
+function PlatformBadge({ platform }) {
+    const config = PLATFORM_CONFIG[platform] || PLATFORM_CONFIG.OpenAI;
+    return (
+        <span style={{
+            display: 'inline-flex', alignItems: 'center', gap: '5px',
+            fontSize: '12px', fontWeight: 600,
+            padding: '3px 10px', borderRadius: '6px',
+            color: config.color, background: config.bg, border: `1px solid ${config.border}`,
+        }}>
+            <span style={{ fontSize: '10px' }}>{config.icon}</span>
+            {platform}
+        </span>
+    );
+}
+
+function BillingBadge({ billingType, billingAmount }) {
+    const config = BILLING_TYPE_CONFIG[billingType] || BILLING_TYPE_CONFIG['标准（余额）'];
+    return (
+        <div>
+            <span style={{
+                display: 'inline-flex', alignItems: 'center',
+                fontSize: '12px', fontWeight: 600,
+                padding: '3px 10px', borderRadius: '6px',
+                color: config.color, background: config.bg, border: `1px solid ${config.border}`,
+            }}>
+                {billingType}
+            </span>
+            {billingAmount && (
+                <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '3px' }}>{billingAmount}</div>
+            )}
+        </div>
+    );
+}
+
+function ToggleSwitch({ checked, onChange, label }) {
+    return (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <div
+                onClick={() => onChange(!checked)}
+                style={{
+                    width: '40px', height: '22px', borderRadius: '11px', cursor: 'pointer',
+                    background: checked ? 'var(--primary-tech, #3b82f6)' : 'rgba(255,255,255,0.15)',
+                    position: 'relative', transition: 'background 0.2s',
+                }}
+            >
+                <div style={{
+                    width: '18px', height: '18px', borderRadius: '50%', background: '#fff',
+                    position: 'absolute', top: '2px',
+                    left: checked ? '20px' : '2px',
+                    transition: 'left 0.2s',
+                }} />
+            </div>
+            {label && <span style={{ fontSize: '13px', color: 'var(--text-muted)' }}>{label}</span>}
+        </div>
+    );
+}
+
+function Tooltip({ text, children }) {
+    return (
+        <span style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', cursor: 'help' }} title={text}>
+            {children}
+        </span>
+    );
+}
 
 export default function Groups() {
     const [groups, setGroups] = useState([]);
     const [keyword, setKeyword] = useState('');
+    const [filterPlatform, setFilterPlatform] = useState('all');
+    const [filterStatus, setFilterStatus] = useState('all');
+    const [filterGroupType, setFilterGroupType] = useState('all');
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingGroup, setEditingGroup] = useState(null);
     const [formData, setFormData] = useState({});
+    const [formError, setFormError] = useState('');
+    const [isLoading, setIsLoading] = useState(false);
+    const [sortConfig, setSortConfig] = useState({ key: 'id', direction: 'asc' });
+    const [currentPage, setCurrentPage] = useState(1);
+    const [pageSize, setPageSize] = useState(10);
 
-    const loadData = () => {
-        api.get('/admin/groups' + (keyword ? '?keyword=' + keyword : '')).then(d => {
-            setGroups(d.items);
-        });
+    const filteredGroups = groups.filter((g) => {
+        if (filterPlatform !== 'all' && g.platform !== filterPlatform) return false;
+        if (filterStatus !== 'all' && g.status !== filterStatus) return false;
+        if (filterGroupType !== 'all' && g.groupType !== filterGroupType) return false;
+        return true;
+    });
+
+    const sortedGroups = [...filteredGroups].sort((a, b) => {
+        const aValue = a[sortConfig.key];
+        const bValue = b[sortConfig.key];
+        if (aValue < bValue) return sortConfig.direction === 'asc' ? -1 : 1;
+        if (aValue > bValue) return sortConfig.direction === 'asc' ? 1 : -1;
+        return 0;
+    });
+
+    const total = sortedGroups.length;
+    const totalPages = Math.max(1, Math.ceil(total / pageSize));
+    const pagedGroups = sortedGroups.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+    const startRow = total === 0 ? 0 : (currentPage - 1) * pageSize + 1;
+    const endRow = total === 0 ? 0 : Math.min(currentPage * pageSize, total);
+
+    const loadData = (nextKeyword = keyword) => {
+        setIsLoading(true);
+        api.get('/admin/groups' + (nextKeyword ? '?keyword=' + encodeURIComponent(nextKeyword) : ''))
+            .then((data) => {
+                setGroups(data.items || []);
+            })
+            .catch((err) => alert(err.message || '加载分组失败'))
+            .finally(() => setTimeout(() => setIsLoading(false), 300));
     };
 
-    useEffect(() => { loadData(); }, []);
+    const requestSort = (key) => {
+        let direction = 'asc';
+        if (sortConfig.key === key && sortConfig.direction === 'asc') {
+            direction = 'desc';
+        }
+        setSortConfig({ key, direction });
+    };
+
+    useEffect(() => {
+        const timer = setTimeout(() => {
+            setCurrentPage(1);
+            loadData(keyword);
+        }, 300);
+        return () => clearTimeout(timer);
+    }, [keyword]);
+
+    useEffect(() => {
+        if (currentPage > totalPages) setCurrentPage(totalPages);
+    }, [currentPage, totalPages]);
+
+    const closeModal = () => {
+        setIsModalOpen(false);
+        setEditingGroup(null);
+        setFormError('');
+    };
 
     const handleCreate = () => {
         setEditingGroup(null);
-        setFormData({});
+        setFormData({
+            platform: 'Anthropic',
+            accountType: resolveAccountTypes('Anthropic')[0],
+            billingType: '标准（余额）',
+            status: '正常',
+            rate: '1',
+            groupType: '公开',
+            claudeCodeLimit: false,
+        });
+        setFormError('');
         setIsModalOpen(true);
     };
 
     const handleEdit = (group) => {
         setEditingGroup(group);
-        setFormData({ name: group.name, priority: group.priority, rate: group.rate, billingType: group.billingType });
+        setFormData({
+            name: group.name,
+            description: group.description || '',
+            platform: group.platform,
+            accountType: group.accountType || resolveAccountTypes(group.platform)[0],
+            billingType: group.billingType,
+            billingAmount: group.billingAmount || '',
+            rate: group.rate,
+            groupType: group.groupType,
+            status: group.status,
+            claudeCodeLimit: group.claudeCodeLimit || false,
+        });
+        setFormError('');
         setIsModalOpen(true);
     };
 
     const handleDelete = (id) => {
-        api.del('/admin/groups/' + id).then(() => loadData());
+        if (!window.confirm('确定要删除该分组吗？此操作不可恢复。')) return;
+        api.del('/admin/groups/' + id)
+            .then(() => loadData())
+            .catch((err) => alert(err.message || '操作失败'));
     };
 
     const handleSubmit = () => {
-        if (editingGroup) {
-            api.put('/admin/groups/' + editingGroup.id, formData).then(() => { setIsModalOpen(false); loadData(); });
-        } else {
-            api.post('/admin/groups', formData).then(() => { setIsModalOpen(false); loadData(); });
-        }
+        setFormError('');
+        const { fallbackGroup, modelRouting, ...payload } = formData;
+        const request = editingGroup
+            ? api.put('/admin/groups/' + editingGroup.id, payload)
+            : api.post('/admin/groups', payload);
+        request.then(() => {
+            closeModal();
+            setKeyword('');
+            loadData('');
+        }).catch((error) => {
+            setFormError(error.message || '操作失败');
+        });
     };
 
     const handleSearch = (e) => {
-        const val = e.target.value;
-        setKeyword(val);
-        api.get('/admin/groups' + (val ? '?keyword=' + val : '')).then(d => {
-            setGroups(d.items);
-        });
+        setKeyword(e.target.value);
     };
+
+    const SortIcon = ({ column }) => {
+        if (sortConfig.key !== column) return null;
+        return sortConfig.direction === 'asc'
+            ? <ChevronDown size={12} style={{ transform: 'rotate(180deg)' }} />
+            : <ChevronDown size={12} />;
+    };
+
+    const accountTypeOptions = resolveAccountTypes(formData.platform || 'Anthropic');
 
     return (
         <div className="page-content">
             <div className="controls-row">
                 <div className="controls-group" style={{ flex: 1 }}>
-                    <div className="select-control" style={{ width: '280px' }}>
+                    <div className="select-control" style={{ width: '240px' }}>
                         <Search size={16} color="var(--text-muted)" />
-                        <input type="text" placeholder="搜索分组名称..." value={keyword} onChange={handleSearch} style={{ background: 'transparent', border: 'none', color: '#fff', outline: 'none', fontSize: '13px' }} />
+                        <input
+                            type="text"
+                            placeholder="搜索分组名称"
+                            value={keyword}
+                            onChange={handleSearch}
+                            style={{ background: 'transparent', border: 'none', color: '#fff', outline: 'none', fontSize: '13px' }}
+                        />
                     </div>
+                    <Select
+                        className="select-control"
+                        value={filterPlatform}
+                        onChange={(e) => { setFilterPlatform(e.target.value); setCurrentPage(1); }}
+                    >
+                        <option value="all">全部平台</option>
+                        <option value="Anthropic">Anthropic</option>
+                        <option value="OpenAI">OpenAI</option>
+                        <option value="Gemini">Gemini</option>
+                        <option value="Antigravity">Antigravity</option>
+                    </Select>
+                    <Select
+                        className="select-control"
+                        value={filterStatus}
+                        onChange={(e) => { setFilterStatus(e.target.value); setCurrentPage(1); }}
+                    >
+                        <option value="all">全部状态</option>
+                        <option value="正常">正常</option>
+                        <option value="异常">异常</option>
+                    </Select>
+                    <Select
+                        className="select-control"
+                        value={filterGroupType}
+                        onChange={(e) => { setFilterGroupType(e.target.value); setCurrentPage(1); }}
+                    >
+                        <option value="all">全部类型</option>
+                        <option value="公开">公开</option>
+                        <option value="专属">专属</option>
+                    </Select>
                 </div>
                 <div className="controls-group">
-                    <button className="select-control" onClick={loadData}><RotateCcw size={16} /></button>
+                    <button
+                        className="select-control"
+                        onClick={() => { setKeyword(''); loadData(''); }}
+                        disabled={isLoading}
+                    >
+                        <RotateCcw size={16} className={isLoading ? 'spin' : ''} />
+                    </button>
                     <button className="btn-primary" onClick={handleCreate} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                         <Plus size={18} /> 创建分组
                     </button>
@@ -85,48 +307,78 @@ export default function Groups() {
                 <table style={{ width: '100%' }}>
                     <thead>
                         <tr>
-                            <th>分组名称 <ChevronDown size={12} /></th>
-                            <th>计费模式 <ChevronDown size={12} /></th>
-                            <th>用户数 <ChevronDown size={12} /></th>
-                            <th>优先级 <ChevronDown size={12} /></th>
-                            <th>费率系数 <ChevronDown size={12} /></th>
-                            <th>状态 <ChevronDown size={12} /></th>
+                            <th onClick={() => requestSort('name')} style={{ cursor: 'pointer' }}>
+                                名称 <SortIcon column='name' />
+                            </th>
+                            <th onClick={() => requestSort('platform')} style={{ cursor: 'pointer' }}>
+                                平台 <SortIcon column='platform' />
+                            </th>
+                            <th onClick={() => requestSort('billingType')} style={{ cursor: 'pointer' }}>
+                                计费类型 <SortIcon column='billingType' />
+                            </th>
+                            <th onClick={() => requestSort('rate')} style={{ cursor: 'pointer' }}>
+                                费率倍数 <SortIcon column='rate' />
+                            </th>
+                            <th onClick={() => requestSort('groupType')} style={{ cursor: 'pointer' }}>
+                                类型 <SortIcon column='groupType' />
+                            </th>
+                            <th onClick={() => requestSort('accountCount')} style={{ cursor: 'pointer' }}>
+                                账号数 <SortIcon column='accountCount' />
+                            </th>
+                            <th onClick={() => requestSort('status')} style={{ cursor: 'pointer' }}>
+                                状态 <SortIcon column='status' />
+                            </th>
                             <th>操作</th>
                         </tr>
                     </thead>
                     <tbody>
-                        {groups.map((group) => (
+                        {pagedGroups.length === 0 ? (
+                            <EmptyState colSpan={8} message={"暂无分组数据"} />
+                        ) : pagedGroups.map((group) => (
                             <tr key={group.id} className="table-row-hover">
                                 <td>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                                        <div style={{ width: '32px', height: '32px', borderRadius: '8px', background: 'rgba(59, 130, 246, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#3b82f6' }}>
-                                            <Box size={16} />
-                                        </div>
-                                        <span style={{ fontWeight: '600' }}>{group.name}</span>
-                                    </div>
-                                </td>
-                                <td style={{ color: 'var(--text-muted)' }}>{group.billingType}</td>
-                                <td>{group.userCount}</td>
-                                <td>
-                                    <span style={{ color: 'var(--primary-tech)', fontWeight: '700' }}>{group.priority}</span>
+                                    <span style={{ fontWeight: '600' }}>{group.name}</span>
                                 </td>
                                 <td>
-                                    <span style={{ padding: '2px 8px', borderRadius: '4px', background: 'rgba(16, 185, 129, 0.1)', color: '#10b981', fontSize: '12px' }}>
-                                        {group.rate}
+                                    <PlatformBadge platform={group.platform} />
+                                </td>
+                                <td>
+                                    <BillingBadge billingType={group.billingType} billingAmount={group.billingAmount} />
+                                </td>
+                                <td>
+                                    <span style={{ fontWeight: '600' }}>{group.rate}x</span>
+                                </td>
+                                <td>
+                                    <span style={{
+                                        padding: '3px 10px', borderRadius: '6px', fontSize: '12px', fontWeight: 600,
+                                        color: group.groupType === '专属' ? '#a78bfa' : 'var(--text-muted)',
+                                        background: group.groupType === '专属' ? 'rgba(167, 139, 250, 0.1)' : 'rgba(255,255,255,0.05)',
+                                        border: group.groupType === '专属' ? '1px solid rgba(167, 139, 250, 0.25)' : '1px solid rgba(255,255,255,0.08)',
+                                    }}>
+                                        {group.groupType}
                                     </span>
                                 </td>
                                 <td>
-                                    <span style={{ color: '#10b981', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '13px' }}>
-                                        <ShieldCheck size={14} /> {group.status}
+                                    <span style={{
+                                        padding: '3px 10px', borderRadius: '6px', fontSize: '12px',
+                                        color: '#3b82f6', background: 'rgba(59, 130, 246, 0.1)',
+                                        border: '1px solid rgba(59, 130, 246, 0.2)',
+                                    }}>
+                                        {group.accountCount}
                                     </span>
                                 </td>
                                 <td>
-                                    <div style={{ display: 'flex', gap: '16px', color: 'var(--text-muted)' }}>
-                                        <div style={{ cursor: 'pointer' }} onClick={() => handleEdit(group)}>
-                                            <Settings size={14} />
+                                    <StatusBadge status={group.status} />
+                                </td>
+                                <td>
+                                    <div style={{ display: 'flex', gap: '16px', color: 'var(--text-muted)', fontSize: '13px' }}>
+                                        <div style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }} onClick={() => handleEdit(group)}>
+                                            <Edit3 size={14} />
+                                            <span>编辑</span>
                                         </div>
-                                        <div style={{ cursor: 'pointer', color: '#ef4444' }} onClick={() => handleDelete(group.id)}>
+                                        <div style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px', color: 'var(--color-error)' }} onClick={() => handleDelete(group.id)}>
                                             <Trash2 size={14} />
+                                            <span>删除</span>
                                         </div>
                                     </div>
                                 </td>
@@ -134,40 +386,156 @@ export default function Groups() {
                         ))}
                     </tbody>
                 </table>
+
+                <Pagination
+                    currentPage={currentPage}
+                    totalPages={totalPages}
+                    onPageChange={setCurrentPage}
+                    pageSize={pageSize}
+                    onPageSizeChange={(size) => { setPageSize(size); setCurrentPage(1); }}
+                    total={total}
+                />
             </div>
 
             <Modal
                 isOpen={isModalOpen}
-                onClose={() => setIsModalOpen(false)}
-                title={editingGroup ? '编辑分组配置' : '创建新分组'}
+                onClose={closeModal}
+                title={editingGroup ? '编辑分组' : '创建分组'}
+                error={formError}
                 footer={(
                     <>
-                        <button className="select-control" onClick={() => setIsModalOpen(false)}>取消</button>
-                        <button className="btn-primary" onClick={handleSubmit}>保存配置</button>
+                        <button className='select-control' onClick={closeModal}>取消</button>
+                        <button className="btn-primary" onClick={handleSubmit}>
+                            {editingGroup ? '更新' : '创建'}
+                        </button>
                     </>
                 )}
             >
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                     <div className="form-group">
-                        <label className="form-label">分组名称</label>
-                        <input type="text" className="form-input" value={formData.name || ''} onChange={e => setFormData({...formData, name: e.target.value})} />
+                        <label className='form-label' htmlFor="group-name">名称</label>
+                        <input
+                            id="group-name"
+                            type="text"
+                            className="form-input"
+                            value={formData.name || ''}
+                            onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                        />
                     </div>
+
                     <div className="form-group">
-                        <label className="form-label">优先级</label>
-                        <input type="number" className="form-input" value={formData.priority || ''} onChange={e => setFormData({...formData, priority: e.target.value})} />
+                        <label className='form-label' htmlFor="group-description">描述</label>
+                        <textarea
+                            id="group-description"
+                            className="form-input"
+                            style={{ minHeight: '80px', resize: 'vertical' }}
+                            value={formData.description || ''}
+                            onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                        />
                     </div>
+
                     <div className="form-group">
-                        <label className="form-label">费率系数</label>
-                        <input type="text" className="form-input" value={formData.rate || '1.0'} onChange={e => setFormData({...formData, rate: e.target.value})} />
+                        <label className='form-label'>平台</label>
+                        <Select
+                            className="form-input"
+                            value={formData.platform || 'Anthropic'}
+                            onChange={(e) => {
+                                const nextPlatform = e.target.value;
+                                const allowedTypes = resolveAccountTypes(nextPlatform);
+                                const nextAccountType = allowedTypes.includes(formData.accountType)
+                                    ? formData.accountType
+                                    : allowedTypes[0];
+                                setFormData({ ...formData, platform: nextPlatform, accountType: nextAccountType });
+                            }}
+                            disabled={!!editingGroup}
+                        >
+                            <option>Anthropic</option>
+                            <option>OpenAI</option>
+                            <option>Gemini</option>
+                            <option>Antigravity</option>
+                        </Select>
+                        {editingGroup && (
+                            <span style={{ fontSize: '11px', color: '#3b82f6', marginTop: '4px', display: 'block' }}>创建后不可修改平台</span>
+                        )}
                     </div>
+
                     <div className="form-group">
-                        <label className="form-label">计费模式</label>
-                        <select className="form-input" value={formData.billingType || '按量计费'} onChange={e => setFormData({...formData, billingType: e.target.value})}>
-                            <option>按量计费</option>
-                            <option>按天计费</option>
-                            <option>固定配额</option>
-                        </select>
+                        <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            账号类型
+                            <Tooltip text="选择该分组路由的账号类型。">
+                                <HelpCircle size={13} color="var(--text-muted)" />
+                            </Tooltip>
+                        </label>
+                        <Select
+                            className="form-input"
+                            value={formData.accountType || accountTypeOptions[0]}
+                            onChange={(e) => setFormData({ ...formData, accountType: e.target.value })}
+                        >
+                            {accountTypeOptions.map((type) => (
+                                <option key={type} value={type}>{type}</option>
+                            ))}
+                        </Select>
+                        <span style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px', display: 'block' }}>
+                            路由时将仅从所选账号类型中挑选可用账号
+                        </span>
                     </div>
+
+                    <div className="form-group">
+                        <label className='form-label' htmlFor="group-rate">费率倍数</label>
+                        <input
+                            id="group-rate"
+                            type="number"
+                            className="form-input"
+                            value={formData.rate || '1'}
+                            onChange={(e) => setFormData({ ...formData, rate: e.target.value })}
+                            min="0"
+                            step="0.1"
+                        />
+                    </div>
+
+                    <div className="form-group">
+                        <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            专属分组
+                            <Tooltip text="专属分组仅订阅用户可见，公开分组所有用户可见。">
+                                <HelpCircle size={13} color="var(--text-muted)" />
+                            </Tooltip>
+                        </label>
+                        <ToggleSwitch
+                            checked={formData.groupType === '专属'}
+                            onChange={(val) => setFormData({ ...formData, groupType: val ? '专属' : '公开' })}
+                            label={formData.groupType === '专属' ? '专属' : '公开'}
+                        />
+                    </div>
+
+                    <div className="form-group">
+                        <label className='form-label'>计费类型</label>
+                        <Select
+                            className="form-input"
+                            value={formData.billingType || '标准（余额）'}
+                            onChange={(e) => setFormData({ ...formData, billingType: e.target.value })}
+                            disabled={!!editingGroup}
+                        >
+                            <option>标准（余额）</option>
+                            <option>订阅（配额）</option>
+                        </Select>
+                        {editingGroup && (
+                            <span style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px', display: 'block' }}>创建后不可修改计费类型</span>
+                        )}
+                    </div>
+
+                    {formData.billingType === '订阅（配额）' && (
+                        <div className="form-group">
+                            <label className='form-label' htmlFor="group-billing-amount">每日配额金额</label>
+                            <input
+                                id="group-billing-amount"
+                                type="text"
+                                className="form-input"
+                                placeholder="例如 20"
+                                value={formData.billingAmount || ''}
+                                onChange={(e) => setFormData({ ...formData, billingAmount: e.target.value })}
+                            />
+                        </div>
+                    )}
                 </div>
             </Modal>
         </div>

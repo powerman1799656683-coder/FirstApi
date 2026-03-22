@@ -6,7 +6,6 @@ public class AuthenticatedUser {
     private String displayName;
     private String email;
     private String role;
-
     public AuthenticatedUser() {}
 
     public AuthenticatedUser(Long id, String username, String displayName, String email, String role) {

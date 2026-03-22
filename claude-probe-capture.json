@@ -1,0 +1,29 @@
+{
+  "method": "POST",
+  "url": "/v1/messages?beta=true",
+  "headers": {
+    "host": "127.0.0.1:8787",
+    "connection": "keep-alive",
+    "accept": "application/json",
+    "x-stainless-retry-count": "0",
+    "x-stainless-timeout": "600",
+    "x-stainless-lang": "js",
+    "x-stainless-package-version": "0.74.0",
+    "x-stainless-os": "Windows",
+    "x-stainless-arch": "x64",
+    "x-stainless-runtime": "node",
+    "x-stainless-runtime-version": "v24.13.1",
+    "anthropic-dangerous-direct-browser-access": "true",
+    "anthropic-version": "2023-06-01",
+    "x-app": "cli",
+    "user-agent": "claude-cli/2.1.81 (external, sdk-cli)",
+    "authorization": "Bearer PROXY_MANAGED",
+    "content-type": "application/json",
+    "anthropic-beta": "claude-code-20...1-24",
+    "accept-language": "*",
+    "sec-fetch-mode": "cors",
+    "accept-encoding": "gzip, deflate",
+    "content-length": "113809"
+  },
+  "bodyPreview": "{\"model\":\"claude-sonnet-4-6\",\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"<system-reminder>\\nThe following skills are available for use with the Skill tool:\\n\\n- update-config: Use this skill to configure the Claude Code harness via settings.json. Automated behaviors (\\\"from now on when X\\\", \\\"each time X\\\", \\\"whenever X\\\", \\\"before/after X\\\") require hooks configured in settings.json - the harness executes these, not Claude, so memory/preferences cannot fulfill them. Also use fo"
+}

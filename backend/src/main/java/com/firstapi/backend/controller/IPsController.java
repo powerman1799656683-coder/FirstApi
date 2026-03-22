@@ -30,27 +30,27 @@ public class IPsController {
 
     @PostMapping
     public ApiResponse<IpItem> create(@RequestBody IpItem.Request request) {
-        return ApiResponse.ok("created", service.create(request));
+        return ApiResponse.ok("创建成功", service.create(request));
     }
 
     @PutMapping("/{id}")
     public ApiResponse<IpItem> update(@PathVariable Long id, @RequestBody IpItem.Request request) {
-        return ApiResponse.ok("updated", service.update(id, request));
+        return ApiResponse.ok("更新成功", service.update(id, request));
     }
 
     @DeleteMapping("/{id}")
     public ApiResponse<Boolean> delete(@PathVariable Long id) {
         service.delete(id);
-        return ApiResponse.ok("deleted", true);
+        return ApiResponse.ok("删除成功", true);
     }
 
     @PostMapping("/{id}/test")
     public ApiResponse<IpItem> test(@PathVariable Long id) {
-        return ApiResponse.ok("tested", service.testIp(id));
+        return ApiResponse.ok("测试完成", service.testIp(id));
     }
 
     @PostMapping("/test-all")
     public ApiResponse<List<IpItem>> testAll() {
-        return ApiResponse.ok("tested", service.testAll());
+        return ApiResponse.ok("测试完成", service.testAll());
     }
 }

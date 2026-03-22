@@ -4,24 +4,24 @@ import Layout from './components/Layout';
 import { AuthProvider } from './auth/AuthContext';
 import { HomeIndex, PublicOnlyRoute, RequireAuth, RequireRole } from './auth/RouteGuards';
 import LoginPage from './pages/Login';
+import LoginLegacyPage from './pages/LoginLegacy';
+import RegisterPage from './pages/Register';
+import RegisterLegacyPage from './pages/RegisterLegacy';
 
-import Dashboard from './pages/Dashboard';
 import Users from './pages/Users';
 import Groups from './pages/Groups';
 import Subscriptions from './pages/Subscriptions';
 import Accounts from './pages/Accounts';
 import Settings from './pages/Settings';
+import MonitorSystem from './pages/MonitorSystem';
 import Monitor from './pages/Monitor';
-import IPs from './pages/IPs';
-import Redemptions from './pages/Redemptions';
-import Records from './pages/Records';
 import Announcements from './pages/Announcements';
-import Promos from './pages/Promos';
 import MyApiKeys from './pages/MyApiKeys';
 import MyRecords from './pages/MyRecords';
-import MySubscription from './pages/MySubscription';
-import MyRedemption from './pages/MyRedemption';
 import Profile from './pages/Profile';
+import Records from './pages/Records';
+import Dashboard from './pages/Dashboard';
+import ModelPricing from './pages/ModelPricing';
 
 function App() {
     return (
@@ -30,6 +30,9 @@ function App() {
                 <Routes>
                     <Route element={<PublicOnlyRoute />}>
                         <Route path="/login" element={<LoginPage />} />
+                        <Route path="/login-legacy" element={<LoginLegacyPage />} />
+                        <Route path="/register" element={<RegisterPage />} />
+                        <Route path="/register-legacy" element={<RegisterLegacyPage />} />
                     </Route>
 
                     <Route element={<RequireAuth />}>
@@ -37,24 +40,22 @@ function App() {
                             <Route index element={<HomeIndex />} />
 
                             <Route element={<RequireRole role="ADMIN" />}>
-                                <Route path="monitor" element={<Monitor />} />
+                                <Route path="monitor/system" element={<MonitorSystem />} />
+                                <Route path="monitor/accounts" element={<Monitor />} />
                                 <Route path="users" element={<Users />} />
                                 <Route path="groups" element={<Groups />} />
                                 <Route path="subscriptions" element={<Subscriptions />} />
                                 <Route path="accounts" element={<Accounts />} />
                                 <Route path="announcements" element={<Announcements />} />
-                                <Route path="ips" element={<IPs />} />
-                                <Route path="redemptions" element={<Redemptions />} />
-                                <Route path="promos" element={<Promos />} />
                                 <Route path="records" element={<Records />} />
-                                <Route path="settings" element={<Settings />} />
                                 <Route path="dashboard" element={<Dashboard />} />
+                                <Route path="admin/model-pricing" element={<ModelPricing />} />
+                                <Route path="settings" element={<Settings />} />
                             </Route>
 
                             <Route path="my-api-keys" element={<MyApiKeys />} />
                             <Route path="my-records" element={<MyRecords />} />
-                            <Route path="my-subscription" element={<MySubscription />} />
-                            <Route path="my-redemption" element={<MyRedemption />} />
+                            <Route path="my-subscription" element={<Navigate to="/my-records" replace />} />
                             <Route path="profile" element={<Profile />} />
                         </Route>
                     </Route>

@@ -26,6 +26,6 @@ public class SettingsController {
 
     @PutMapping
     public ApiResponse<SettingsData> update(@RequestBody SettingsData.Request request) {
-        return ApiResponse.ok("updated", settingsService.updateSettings(request));
+        return ApiResponse.ok("更新成功", settingsService.updateSettings(request));
     }
 }

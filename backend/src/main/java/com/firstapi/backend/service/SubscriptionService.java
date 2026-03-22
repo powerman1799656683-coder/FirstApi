@@ -29,7 +29,8 @@ public class SubscriptionService {
         if (!isBlank(keyword)) {
             items = items.stream()
                 .filter(i -> contains(i.getUser(), keyword)
-                           || contains(i.getGroup(), keyword))
+                           || contains(i.getGroup(), keyword)
+                           || contains(String.valueOf(i.getUid()), keyword))
                 .collect(Collectors.toList());
         }
         return new PageResponse<SubscriptionItem>(items);
@@ -38,14 +39,14 @@ public class SubscriptionService {
     public SubscriptionItem get(Long id) {
         SubscriptionItem item = repository.findById(id);
         if (item == null) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Subscription not found");
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "订阅不存在");
         }
         return item;
     }
 
     public SubscriptionItem create(SubscriptionItem.Request req) {
         SubscriptionItem item = new SubscriptionItem();
-        item.setUser(emptyAsDefault(req.getUser(), "new-user@example.com"));
+        item.setUser(emptyAsDefault(req.getUser(), "new-user@firstapi.com"));
         item.setUid(req.getUid() != null ? req.getUid() : 0L);
         item.setGroup(emptyAsDefault(req.getGroup(), "Claude Max20"));
         item.setUsage(buildUsage(req.getUsage(), req.getQuota()));
@@ -58,7 +59,7 @@ public class SubscriptionService {
     public SubscriptionItem update(Long id, SubscriptionItem.Request req) {
         SubscriptionItem existing = repository.findById(id);
         if (existing == null) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Subscription not found");
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "订阅不存在");
         }
         if (req.getUser() != null) existing.setUser(req.getUser());
         if (req.getUid() != null) existing.setUid(req.getUid());
@@ -81,7 +82,7 @@ public class SubscriptionService {
     public void delete(Long id) {
         SubscriptionItem existing = repository.findById(id);
         if (existing == null) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Subscription not found");
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "订阅不存在");
         }
         repository.deleteById(id);
     }
@@ -91,21 +92,21 @@ public class SubscriptionService {
             return usage;
         }
         if (!isBlank(quota)) {
-            return "$0.00 / $" + quota;
+            return "¥0.00 / ¥" + quota;
         }
-        return "$0.00 / $0.00";
+        return "¥0.00 / ¥0.00";
     }
 
     private String replaceQuota(String usage, String quota) {
-        String used = "$0.00";
+        String used = "¥0.00";
         if (!isBlank(usage) && usage.contains("/")) {
             used = usage.split("/")[0].trim();
         }
-        return used + " / $" + quota;
+        return used + " / ¥" + quota;
     }
 
     private Double deriveProgress(String usage) {
-        if (isBlank(usage) || usage.contains("∞")) {
+        if (isBlank(usage) || usage.indexOf('\uFFFD') >= 0) {
             return 0.0;
         }
         Matcher matcher = NUMBER_PATTERN.matcher(usage);

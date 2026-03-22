@@ -1,6 +1,6 @@
 package com.firstapi.backend.config;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import com.firstapi.backend.common.ApiResponse;
 import com.firstapi.backend.common.CurrentSessionHolder;
 import com.firstapi.backend.model.AuthenticatedUser;
@@ -9,10 +9,10 @@ import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
-import javax.servlet.FilterChain;
-import javax.servlet.ServletException;
-import javax.servlet.http.HttpServletRequest;
-import javax.servlet.http.HttpServletResponse;
+import jakarta.servlet.FilterChain;
+import jakarta.servlet.ServletException;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 
@@ -40,12 +40,12 @@ public class AuthFilter extends OncePerRequestFilter {
 
         AuthenticatedUser user = authService.resolveAuthenticatedUser(request);
         if (user == null) {
-            writeJsonError(response, HttpServletResponse.SC_UNAUTHORIZED, "Authentication required");
+            writeJsonError(response, HttpServletResponse.SC_UNAUTHORIZED, "请先登录");
             return;
         }
 
         if (path.startsWith("/api/admin/") && !user.isAdmin()) {
-            writeJsonError(response, HttpServletResponse.SC_FORBIDDEN, "Admin access required");
+            writeJsonError(response, HttpServletResponse.SC_FORBIDDEN, "需要管理员权限");
             return;
         }
 
@@ -58,14 +58,23 @@ public class AuthFilter extends OncePerRequestFilter {
     }
 
     private boolean isPublicApi(String path) {
-        return "/api/auth/login".equals(path) || "/api/auth/logout".equals(path);
+        return path.startsWith("/api/public/")
+                || "/api/auth/login".equals(path)
+                || "/api/auth/register".equals(path)
+                || "/api/auth/logout".equals(path);
     }
 
     private void applySecurityHeaders(HttpServletResponse response) {
         response.setHeader("X-Frame-Options", "DENY");
         response.setHeader("X-Content-Type-Options", "nosniff");
+        response.setHeader("X-XSS-Protection", "1; mode=block");
         response.setHeader("Referrer-Policy", "no-referrer");
         response.setHeader("Permissions-Policy", "geolocation=(), microphone=(), camera=()");
+        response.setHeader("Content-Security-Policy",
+                "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
+                + "img-src 'self' data:; font-src 'self'; connect-src 'self'; "
+                + "frame-ancestors 'none'; base-uri 'self'; form-action 'self'");
+        response.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
         response.setHeader("Cache-Control", "no-store");
     }
 

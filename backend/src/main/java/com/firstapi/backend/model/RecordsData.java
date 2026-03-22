@@ -7,6 +7,7 @@ public class RecordsData {
     public List<PieSlice> modelPie;
     public List<BarPoint> bar;
     public List<RecordItem> records;
+    public List<String> models;
 
     public static class StatCard {
         public String title;

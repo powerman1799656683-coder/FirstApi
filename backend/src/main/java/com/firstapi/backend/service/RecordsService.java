@@ -5,62 +5,105 @@ import com.firstapi.backend.model.RecordsData.BarPoint;
 import com.firstapi.backend.model.RecordsData.PieSlice;
 import com.firstapi.backend.model.RecordsData.RecordItem;
 import com.firstapi.backend.model.RecordsData.StatCard;
+import com.firstapi.backend.model.RelayRecordItem;
+import com.firstapi.backend.repository.RelayRecordRepository;
 import org.springframework.stereotype.Service;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
-import java.util.Locale;
 
 @Service
 public class RecordsService {
 
+    private final RelayRecordRepository relayRecordRepository;
+
+    public RecordsService(RelayRecordRepository relayRecordRepository) {
+        this.relayRecordRepository = relayRecordRepository;
+    }
+
     public RecordsData getRecords(String keyword) {
         RecordsData data = new RecordsData();
-        data.stats = Arrays.asList(
-                new StatCard("今日总消费", "$142.18", "+15.2%", "zap", "#ef4444"),
-                new StatCard("总请求次数", "72,655", "+8.4%", "activity", "#10b981"),
-                new StatCard("活跃 API 密钥", "38", "+2", "database", "#3b82f6"),
-                new StatCard("平均响应耗时", "1.24s", "-5.1%", "clock", "#00f2ff")
+
+        // 统计卡片（真实聚合）
+        BigDecimal totalCost = relayRecordRepository.sumCost();
+        long totalTokens = relayRecordRepository.sumTotalTokens();
+        long activeKeys = relayRecordRepository.countDistinctApiKeys();
+        double avgLatency = relayRecordRepository.avgLatencyMs();
+
+        data.stats = List.of(
+                new StatCard("总调用成本", formatCost(totalCost), "", "zap", "#ef4444"),
+                new StatCard("总消耗令牌", formatTokens(totalTokens), "", "activity", "#10b981"),
+                new StatCard("活跃 API 密钥", String.valueOf(activeKeys), "", "database", "#3b82f6"),
+                new StatCard("平均响应耗时", formatLatency(avgLatency), "", "clock", "#00f2ff")
         );
-        data.modelPie = Arrays.asList(
-                new PieSlice("Claude-3.5", 45, "#00f2ff"),
-                new PieSlice("GPT-4o", 35, "#3b82f6"),
-                new PieSlice("Gemini-1.5", 15, "#10b981"),
-                new PieSlice("Llama-3", 5, "#8b5cf6")
-        );
-        data.bar = Arrays.asList(
-                new BarPoint("03-08", 120),
-                new BarPoint("03-09", 180),
-                new BarPoint("03-10", 420),
-                new BarPoint("03-11", 380),
-                new BarPoint("03-12", 550),
-                new BarPoint("03-13", 490)
-        );
-        List<RecordItem> all = Arrays.asList(
-                new RecordItem(1L, "19:45:10", "fzq@yc.com", "sk-yc-a1b2...", "gpt-4o", "1,240", "$0.018", "成功"),
-                new RecordItem(2L, "19:44:02", "zhou@yc.com", "sk-yc-c3d4...", "claude-3-5", "3,800", "$0.057", "成功"),
-                new RecordItem(3L, "19:43:44", "liu@yc.com", "sk-yc-e5f6...", "gpt-4o-mini", "520", "$0.001", "成功"),
-                new RecordItem(4L, "19:42:12", "guest_01", "sk-yc-g7h8...", "dall-e-3", "1 image", "$0.040", "成功")
-        );
-        data.records = filter(all, keyword);
+
+        // 模型分布饼图
+        List<RelayRecordRepository.ModelStat> modelStats = relayRecordRepository.groupByModel();
+        long totalCalls = modelStats.stream().mapToLong(RelayRecordRepository.ModelStat::callCount).sum();
+        String[] colors = {"#00f2ff", "#3b82f6", "#10b981", "#8b5cf6", "#f59e0b", "#ef4444", "#ec4899"};
+        List<PieSlice> pie = new ArrayList<>();
+        for (int i = 0; i < modelStats.size(); i++) {
+            RelayRecordRepository.ModelStat ms = modelStats.get(i);
+            int pct = totalCalls > 0 ? (int) Math.round(ms.callCount() * 100.0 / totalCalls) : 0;
+            pie.add(new PieSlice(ms.modelName(), pct, colors[i % colors.length]));
+        }
+        data.modelPie = pie;
+
+        // 趋势柱状图（最近 7 天）
+        List<RelayRecordRepository.DayStat> dayStats = relayRecordRepository.groupByDate(7);
+        List<BarPoint> bar = new ArrayList<>();
+        for (RelayRecordRepository.DayStat ds : dayStats) {
+            bar.add(new BarPoint(ds.date(), (int) Math.min(ds.totalTokens(), Integer.MAX_VALUE)));
+        }
+        data.bar = bar;
+
+        // 记录列表
+        List<RelayRecordItem> rawRecords = relayRecordRepository.findAll(keyword);
+        List<RecordItem> records = new ArrayList<>();
+        for (RelayRecordItem r : rawRecords) {
+            String tokens = r.getTotalTokens() != null ? formatNumber(r.getTotalTokens()) : "-";
+            String cost;
+            if (r.getCost() != null) {
+                cost = "¥" + r.getCost().setScale(6, RoundingMode.HALF_UP).stripTrailingZeros().toPlainString();
+            } else if ("USAGE_MISSING".equals(r.getPricingStatus())) {
+                cost = "usage缺失";
+            } else if ("NOT_FOUND".equals(r.getPricingStatus())) {
+                cost = "未定价";
+            } else {
+                cost = "-";
+            }
+            String status = Boolean.TRUE.equals(r.getSuccess()) ? "成功" : "失败";
+            String time = r.getCreatedAt() != null ? r.getCreatedAt() : "-";
+            String user = "uid:" + r.getOwnerId();
+            String key = "keyId:" + r.getApiKeyId();
+            records.add(new RecordItem(r.getId(), time, user, key, r.getModel(), tokens, cost, status));
+        }
+        data.records = records;
+        data.models = relayRecordRepository.distinctModels();
         return data;
     }
 
-    private List<RecordItem> filter(List<RecordItem> all, String keyword) {
-        if (keyword == null || keyword.trim().isEmpty()) {
-            return all;
-        }
-        List<RecordItem> result = new ArrayList<RecordItem>();
-        for (RecordItem item : all) {
-            if (contains(item.user, keyword) || contains(item.key, keyword) || contains(item.model, keyword)) {
-                result.add(item);
-            }
-        }
-        return result;
+    private String formatCost(BigDecimal cost) {
+        if (cost == null || cost.compareTo(BigDecimal.ZERO) == 0) return "¥0.00";
+        return "¥" + cost.setScale(2, RoundingMode.HALF_UP).toPlainString();
     }
 
-    private boolean contains(String text, String keyword) {
-        return text != null && text.toLowerCase(Locale.ROOT).contains(keyword.toLowerCase(Locale.ROOT));
+    private String formatTokens(long tokens) {
+        if (tokens >= 1_000_000) return String.format("%.1fM", tokens / 1_000_000.0);
+        if (tokens >= 1_000) return String.format("%.1fK", tokens / 1_000.0);
+        return String.valueOf(tokens);
+    }
+
+    private String formatLatency(double ms) {
+        if (ms >= 1000) return String.format("%.2fs", ms / 1000.0);
+        return String.format("%.0fms", ms);
+    }
+
+    private String formatNumber(long n) {
+        if (n >= 1_000_000) return String.format("%.1fM", n / 1_000_000.0);
+        if (n >= 1_000) return String.format("%,d", n);
+        return String.valueOf(n);
     }
 }

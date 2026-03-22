@@ -6,12 +6,26 @@ const AuthContext = createContext(null);
 export function AuthProvider({ children }) {
     const [user, setUser] = useState(null);
     const [loading, setLoading] = useState(true);
+    const [publicConfig, setPublicConfig] = useState({
+        siteName: '赔钱中转',
+        siteAnnouncement: '',
+        registrationOpen: true,
+    });
 
     useEffect(() => {
         let active = true;
 
-        async function loadSession() {
+        async function loadData() {
             try {
+                const config = await api.get('/public/config', {
+                    allowUnauthorized: true,
+                    skipUnauthorizedEvent: true,
+                }).catch(() => null);
+
+                if (active && config) {
+                    setPublicConfig(config);
+                }
+
                 const session = await api.get('/auth/session', {
                     allowUnauthorized: true,
                     skipUnauthorizedEvent: true,
@@ -30,7 +44,7 @@ export function AuthProvider({ children }) {
             }
         }
 
-        loadSession();
+        loadData();
         return () => {
             active = false;
         };
@@ -57,6 +71,15 @@ export function AuthProvider({ children }) {
         return session;
     };
 
+    const register = async (data) => {
+        const session = await api.post('/auth/register', data, {
+            allowUnauthorized: true,
+            skipUnauthorizedEvent: true,
+        });
+        setUser(session);
+        return session;
+    };
+
     const login = async (credentials) => {
         const session = await api.post('/auth/login', credentials, {
             allowUnauthorized: true,
@@ -66,19 +89,33 @@ export function AuthProvider({ children }) {
         return session;
     };
 
+    const refreshPublicConfig = async () => {
+        const config = await api.get('/public/config', {
+            allowUnauthorized: true,
+            skipUnauthorizedEvent: true,
+        }).catch(() => null);
+        if (config) {
+            setPublicConfig(config);
+        }
+        return config;
+    };
+
     const logout = async () => {
         try {
             await api.post('/auth/logout', {}, {
                 allowUnauthorized: true,
                 skipUnauthorizedEvent: true,
             });
+        } catch {
+            // Server-side logout may fail (network error, expired session, etc.)
+            // We still clear local state below.
         } finally {
             setUser(null);
         }
     };
 
     return (
-        <AuthContext.Provider value={{ user, loading, login, logout, refreshSession }}>
+        <AuthContext.Provider value={{ user, loading, register, login, logout, refreshSession, publicConfig, refreshPublicConfig }}>
             {children}
         </AuthContext.Provider>
     );
@@ -87,7 +124,7 @@ export function AuthProvider({ children }) {
 export function useAuth() {
     const context = useContext(AuthContext);
     if (!context) {
-        throw new Error('useAuth must be used within an AuthProvider');
+        throw new Error('useAuth 必须在 AuthProvider 内使用');
     }
     return context;
 }

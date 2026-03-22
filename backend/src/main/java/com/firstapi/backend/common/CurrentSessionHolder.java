@@ -21,7 +21,7 @@ public final class CurrentSessionHolder {
     public static AuthenticatedUser require() {
         AuthenticatedUser user = CURRENT.get();
         if (user == null) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Authentication required");
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "请先登录");
         }
         return user;
     }

@@ -1,0 +1,42 @@
+{
+    "common": {
+        "system_overview": "System Overview & Statistics",
+        "balance": "Balance",
+        "logout": "Safe Logout",
+        "profile": "Profile Settings",
+        "settings": "Global Config",
+        "current_user": "CURRENT LOGIN",
+        "nav": {
+            "monitor": "Monitor Center",
+            "monitor_system": "System Monitor",
+            "monitor_accounts": "Data Monitor",
+            "users": "User Management",
+            "groups": "Group Management",
+            "subscriptions": "Subscription Management",
+            "accounts": "Account Management",
+            "announcements": "Announcements",
+            "ips": "IP Management",
+            "system_settings": "System Settings",
+            "my_account": "My Account",
+            "api_keys": "API Keys",
+            "usage_records": "Usage Records",
+            "my_subscription": "My Subscription",
+            "my_profile": "Profile",
+            "sign_out": "Sign Out"
+        }
+    },
+    "login": {
+        "welcome": "Welcome back",
+        "subtitle": "Login to your account to continue",
+        "username": "Username",
+        "password": "Password",
+        "username_placeholder": "Enter username",
+        "password_placeholder": "Enter password",
+        "login_button": "Login now",
+        "verifying": "Verifying...",
+        "no_account": "Don't have an account?",
+        "register_now": "Register Free",
+        "error_required": "Please enter username and password",
+        "error_failed": "Login failed, please check your credentials"
+    }
+}

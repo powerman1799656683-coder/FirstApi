@@ -45,6 +45,25 @@ API_doc_extract/
 # Claude settings
 **/.claude/
 
+# Sensitive / credential files
+.env
+.env.*
+cookies*.txt
+.tmp_login_*.json
+.tmp_acc_*.json
+.tmp_grp_*.json
+.tmp_key_*.json
+.tmp_create_*.json
+.tmp_*.json
+credentials.json
+secrets.json
+
+# Temp files (root level)
+.tmp_*
+.runlogs/
+.tools/
+.mcp.json
+
 # Misc
 *.log
 *.local

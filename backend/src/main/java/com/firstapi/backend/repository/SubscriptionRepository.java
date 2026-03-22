@@ -4,7 +4,7 @@ import com.firstapi.backend.model.SubscriptionItem;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
-import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 
 @Repository
@@ -33,11 +33,7 @@ public class SubscriptionRepository extends JdbcListRepository<SubscriptionItem>
 
     @Override
     protected List<SubscriptionItem> defaultItems() {
-        return Arrays.asList(
-                new SubscriptionItem(1L, "check123@gmail.com", 22L, "Claude Max20", "$0.00 / Unlimited", 0.0, "2026/12/31", "正常"),
-                new SubscriptionItem(2L, "atawubop75@gmail.com", 21L, "Claude Pro", "$12.50 / $100", 12.5, "2026/06/30", "正常"),
-                new SubscriptionItem(3L, "wenchy@gmail.com", 18L, "Enterprise Gold", "$100.00 / $100", 100.0, "2026/03/15", "已满额")
-        );
+        return Collections.emptyList();
     }
 
     @Override

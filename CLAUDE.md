@@ -1,17 +1,16 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
-
 ## Build & Run Commands
 
-### Backend (Spring Boot)
+### Backend (Spring Boot 4.0.3 + Java 25)
 ```bash
 cd D:/FirstApi/backend
 mvn package -DskipTests          # Build JAR
-java -jar target/backend-0.0.1-SNAPSHOT.jar  # Run on port 8080
+FIRSTAPI_ADMIN_PASSWORD=”AdminPass123!” FIRSTAPI_USER_ENABLED=true FIRSTAPI_USER_PASSWORD=”UserPass123!” java -jar target/backend-0.0.1-SNAPSHOT.jar  # Run on port 8080
 ```
+The backend requires a running MySQL on 127.0.0.1:3306 (user `root`, password `root`, database `firstapi`). Schema is auto-created via `schema.sql` on startup (`spring.sql.init.mode=always`).
 
-### Frontend (React + Vite)
+### Frontend (React 19 + Vite 8)
 ```bash
 cd D:/FirstApi/frontend
 npm run dev      # Dev server on port 5173 (proxies /api to 8080)
@@ -24,49 +23,44 @@ npm run lint     # ESLint
 rm -rf D:/FirstApi/backend/src/main/resources/static/*
 cp -r D:/FirstApi/frontend/dist/* D:/FirstApi/backend/src/main/resources/static/
 ```
-After deploying, the backend serves both API and frontend on port 8080.
 
-## Architecture
+## Tech Stack
+- **Backend**: Java 25 + Spring Boot 4.0.3 + Spring Framework 7 + Jackson 3 + MySQL
+- **Frontend**: React 19 + Vite 8 + React Router DOM 7
+- **Namespace**: Uses `jakarta.*` (NOT javax) for servlet/annotation imports
+- **Jackson**: Uses `tools.jackson.*` for databind/core, `com.fasterxml.jackson.annotation.*` for annotations
 
-Full-stack admin dashboard for an API relay/proxy platform ("YC-API HUB").
+## Security
+- **Rate Limiting**: `RateLimitFilter` enforces per-IP limits — 10/min for auth endpoints, 120/min for general API
+- **Encryption**: `SensitiveDataService` uses AES-256-GCM for stored credentials (key from `FIRSTAPI_DATA_SECRET`)
+- **Authentication**: Cookie-based sessions with PBKDF2-hashed passwords (min 10 chars)
+- **Session**: Existing sessions invalidated on new login (prevents session fixation)
 
-### Backend: Java 8 + Spring Boot 2.7.18
-Three-layer architecture under `com.firstapi.backend`:
+## 默认账号说明
+Admin 管理员账号：admin / AdminPass123!，不可修改 。
+Member 普通用户账号：member / UserPass123!，不可修改。
+需要使用账户进行测试时直接使用上面的账号进行测试就行。
 
-- **controller/** → Thin REST controllers, only HTTP mapping + delegation. All return `ApiResponse<T>`.
-- **service/** → Business logic, validation, keyword filtering. Throws `ResponseStatusException(NOT_FOUND)` for missing entities.
-- **repository/** → Data access via `SimpleStore<T>` (in-memory ConcurrentHashMap). Seed data loaded in `@PostConstruct`.
-- **model/** → Entity classes implement `SimpleStore.Identifiable`. Nested `Request` inner class for POST/PUT payloads.
-- **common/** → `SimpleStore<T>` (generic CRUD store), `ApiResponse<T>` (response wrapper), `PageResponse<T>` (list wrapper with items + total).
-- **config/** → `WebConfig` (CORS for localhost:5173), `SpaWebConfig` (SPA fallback to index.html).
+## 启动与重启要求
+除非明确要求重新部署或重启，否则不要主动重启项目，包括不要重启后端、前端或重新执行部署流程，只有在明确说明 “重新部署”、”重新启动前端”、”重新启动后端” 时才能执行。
 
-**API pattern**: `/api/admin/*` for admin endpoints, `/api/user/*` for user-facing endpoints.
+新增/修改代码过程中出现乱码，应立即修复。
 
-**Important**: Uses `javax.annotation.PostConstruct` (NOT jakarta) because Spring Boot 2.7.
+系统无需默认值。
 
-### Frontend: React 19 + Vite 8 + React Router DOM 7
-- `src/api.js` → Fetch wrapper, all requests go through `/api` base path
-- `src/App.jsx` → Router with 17 routes (12 admin + 5 user center)
-- `src/components/Layout.jsx` → Main navigation shell
-- `src/pages/` → 17 page components, each fetches data via `api.get/post/put/del`
-- Charts use `recharts`, icons use `lucide-react`
+前端规范：查询框样式应避免重叠；弹出窗口点击空白区域时不应自动关闭。
 
-### Data Flow
-Frontend `api.js` → Vite proxy (dev) or direct (prod) → Spring controllers → services → repositories → `SimpleStore<T>` (ConcurrentHashMap)
+## 搜索框样式规范（禁止修改）
+所有页面的搜索框使用 `.select-control` 容器（`display: inline-flex`），内部放置 `<Search>` 图标 + `<input>`。
+- 图标使用 `flex-shrink: 0` 保持固定尺寸
+- 输入框使用 `flex: 1`（不是 `width: 100%`）填充剩余空间
+- **禁止**将输入框改为 `width: 100%`，禁止对图标使用 `position: absolute`，这些写法会导致图标和输入框重叠
+- 相关 CSS 在 `frontend/src/index.css` 的 `.select-control > svg` 和 `.select-control input` 规则中，已有注释说明，请勿修改
 
-All API responses follow: `{ success: boolean, message: string, data: T }`
-List endpoints return: `{ success, message, data: { items: [...], total: N } }`
+必须用中文回答。
 
-### No Database
-All data is in-memory via `SimpleStore`. Data resets on restart. Repositories seed initial data in `@PostConstruct`.
-
-### No Tests
-No test suite exists. Manual testing via curl against running backend.
-
-## 17 Modules
-
-**CRUD entities** (9, each has controller → service → repository → model):
-Users, Groups, Subscriptions, Accounts, Announcements, IPs, Promos, Redemptions, MyApiKeys
-
-**Data-only modules** (8, service returns hardcoded/computed data, no repository):
-Dashboard, Records, Monitor, Settings, Profile, MySubscription, MyRecords, MyRedemption
+- 管理员：
+admin / AdminPass123!
+ 
+- 普通用户：
+member / UserPass123! 

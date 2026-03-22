@@ -1,60 +1,62 @@
 import React, { useEffect, useState } from 'react';
-import {
-    Settings,
-    Shield,
-    Mail,
-    Globe,
-    Zap,
-    Lock,
-    Server,
-    Save,
-    Sliders,
-    CheckCircle2,
-    AlertCircle,
-} from 'lucide-react';
+import { AlertCircle, CheckCircle2, Save, Shield, Sliders } from 'lucide-react';
 import { api } from '../api';
+import { useAuth } from '../auth/AuthContext';
 
-function toInputNumber(value) {
-    if (value === null || value === undefined) {
-        return '';
-    }
-    return String(value);
-}
+const DEFAULT_FORM = {
+    siteName: '',
+    siteAnnouncement: '',
+    registrationOpen: true,
+    defaultGroup: '默认组',
+};
 
-function toRequestNumber(value) {
-    if (value === '') {
-        return null;
-    }
-    return Number(value);
+function mapSettingsToForm(data) {
+    return {
+        siteName: data?.siteName || '',
+        siteAnnouncement: data?.siteAnnouncement || '',
+        registrationOpen: data?.registrationOpen !== undefined ? data.registrationOpen : true,
+        defaultGroup: data?.defaultGroup || '默认组',
+    };
 }
 
 export default function SettingsPage() {
-    const [activeTab, setActiveTab] = useState('general');
+    const { refreshPublicConfig } = useAuth();
     const [saving, setSaving] = useState(false);
     const [saved, setSaved] = useState(false);
     const [saveError, setSaveError] = useState('');
-    const [form, setForm] = useState({
-        siteName: '',
-        siteAnnouncement: '',
-        apiProxy: '',
-        streamTimeout: '',
-        retryLimit: '',
-        registrationOpen: true,
-        defaultGroup: 'Default',
-    });
+    const [form, setForm] = useState(DEFAULT_FORM);
+    const [availableGroups, setAvailableGroups] = useState([]);
 
     useEffect(() => {
-        api.get('/admin/settings').then((data) => {
-            setForm({
-                siteName: data.siteName || '',
-                siteAnnouncement: data.siteAnnouncement || '',
-                apiProxy: data.apiProxy || '',
-                streamTimeout: toInputNumber(data.streamTimeout),
-                retryLimit: toInputNumber(data.retryLimit),
-                registrationOpen: data.registrationOpen !== undefined ? data.registrationOpen : true,
-                defaultGroup: data.defaultGroup || 'Default',
+        let alive = true;
+        api.get('/admin/groups')
+            .then((data) => {
+                if (alive) {
+                    const groupNames = (data.items || []).map(g => g.name);
+                    // Ensure '默认组' is in the list if not present, and handle uniqueness
+                    const uniqueGroups = Array.from(new Set(['默认组', ...groupNames]));
+                    setAvailableGroups(uniqueGroups);
+                }
+            })
+            .catch(() => {
+                if (alive) setAvailableGroups(['默认组']);
             });
-        });
+
+        api.get('/admin/settings')
+            .then((data) => {
+                if (alive) {
+                    setForm(mapSettingsToForm(data));
+                }
+            })
+            .catch((error) => {
+                if (alive) {
+                    setSaveError(error.message || '加载设置失败');
+                }
+            });
+
+        return () => {
+            alive = false;
+        };
     }, []);
 
     const handleChange = (field, value) => {
@@ -71,210 +73,104 @@ export default function SettingsPage() {
         api.put('/admin/settings', {
             siteName: form.siteName,
             siteAnnouncement: form.siteAnnouncement,
-            apiProxy: form.apiProxy,
-            streamTimeout: toRequestNumber(form.streamTimeout),
-            retryLimit: toRequestNumber(form.retryLimit),
             registrationOpen: form.registrationOpen,
             defaultGroup: form.defaultGroup,
         })
             .then(() => {
                 setSaved(true);
+                refreshPublicConfig();
                 setTimeout(() => setSaved(false), 2000);
             })
             .catch((error) => {
-                setSaveError(error.message || 'Settings save failed');
+                setSaveError(error.message || '设置保存失败');
             })
             .finally(() => {
                 setSaving(false);
             });
     };
 
-    const tabs = [
-        { id: 'general', label: 'General', icon: Sliders },
-        { id: 'auth', label: 'Auth', icon: Lock },
-        { id: 'email', label: 'Email', icon: Mail },
-        { id: 'api', label: 'API', icon: Zap },
-        { id: 'security', label: 'Security', icon: Shield },
-        { id: 'advance', label: 'Advanced', icon: Server },
-    ];
-
     return (
-        <div className="page-content" style={{ maxWidth: '1200px' }}>
-            <div style={{ display: 'grid', gridTemplateColumns: '250px 1fr', gap: '32px' }}>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                    {tabs.map((item) => (
-                        <div
-                            key={item.id}
-                            data-testid={`settings-tab-${item.id}`}
-                            onClick={() => setActiveTab(item.id)}
-                            style={{
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: '12px',
-                                padding: '12px 16px',
-                                borderRadius: '8px',
-                                cursor: 'pointer',
-                                background: activeTab === item.id ? 'rgba(0, 242, 255, 0.1)' : 'transparent',
-                                color: activeTab === item.id ? 'var(--primary-tech)' : 'var(--text-muted)',
-                                fontWeight: '600',
-                                fontSize: '14px',
-                                transition: 'all 0.2s',
-                                border: activeTab === item.id ? '1px solid rgba(0, 242, 255, 0.2)' : '1px solid transparent',
-                            }}
-                        >
-                            <item.icon size={18} />
-                            {item.label}
-                        </div>
-                    ))}
-                </div>
+        <div className="page-content settings-page" style={{ maxWidth: '1080px' }}>
+            <div className="settings-layout settings-layout--single">
+                <div className="settings-panel">
+                    <div className="chart-card">
+                        <h3 className="page-title" style={{ marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                            <Sliders size={20} color="var(--primary-tech)" /> 系统设置
+                        </h3>
+                        <p className="caption-text" style={{ margin: 0, fontSize: '13px' }}>
+                            当前页面仅保留必要配置，减少维护复杂度。
+                        </p>
+                    </div>
 
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-                    {activeTab === 'general' && (
-                        <div className="chart-card">
-                            <h3 style={{ fontSize: '18px', fontWeight: '700', marginBottom: '24px', display: 'flex', alignItems: 'center', gap: '10px' }}>
-                                <Sliders size={20} color="var(--primary-tech)" /> General Settings
-                            </h3>
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-                                <div className="form-group">
-                                    <label className="form-label">Site Name</label>
-                                    <input
-                                        data-testid="settings-site-name"
-                                        type="text"
-                                        className="form-input"
-                                        value={form.siteName}
-                                        onChange={(event) => handleChange('siteName', event.target.value)}
-                                    />
-                                </div>
-                                <div className="form-group">
-                                    <label className="form-label">Announcement</label>
-                                    <textarea
-                                        data-testid="settings-site-announcement"
-                                        className="form-input"
-                                        style={{ minHeight: '100px' }}
-                                        value={form.siteAnnouncement}
-                                        onChange={(event) => handleChange('siteAnnouncement', event.target.value)}
-                                    />
-                                </div>
+                    <div className="chart-card">
+                        <h3 className="section-title" style={{ marginBottom: '20px' }}>基础信息</h3>
+                        <div style={{ display: 'grid', gap: '18px' }}>
+                            <div className="form-group">
+                                <label className="form-label" htmlFor="settings-site-name">站点名称</label>
+                                <input
+                                    id="settings-site-name"
+                                    data-testid="settings-site-name"
+                                    type="text"
+                                    className="form-input"
+                                    value={form.siteName}
+                                    onChange={(event) => handleChange('siteName', event.target.value)}
+                                />
+                            </div>
+                            <div className="form-group">
+                                <label className="form-label" htmlFor="settings-announcement">站点公告</label>
+                                <textarea
+                                    id="settings-announcement"
+                                    data-testid="settings-site-announcement"
+                                    className="form-input"
+                                    style={{ minHeight: '110px' }}
+                                    value={form.siteAnnouncement}
+                                    onChange={(event) => handleChange('siteAnnouncement', event.target.value)}
+                                />
                             </div>
                         </div>
-                    )}
+                    </div>
 
-                    {activeTab === 'api' && (
-                        <div className="chart-card">
-                            <h3 style={{ fontSize: '18px', fontWeight: '700', marginBottom: '24px', display: 'flex', alignItems: 'center', gap: '10px' }}>
-                                <Zap size={20} color="var(--primary-tech)" /> API Settings
-                            </h3>
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-                                <div className="form-group">
-                                    <label className="form-label">API Proxy</label>
-                                    <div style={{ display: 'flex', gap: '12px' }}>
-                                        <input
-                                            data-testid="settings-api-proxy"
-                                            type="text"
-                                            className="form-input"
-                                            value={form.apiProxy}
-                                            onChange={(event) => handleChange('apiProxy', event.target.value)}
-                                        />
-                                        <button className="select-control" type="button"><Globe size={16} /></button>
+                    <div className="chart-card">
+                        <h3 className="section-title" style={{ marginBottom: '20px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <Shield size={18} color="var(--primary-tech)" /> 注册策略
+                        </h3>
+
+                        <div className="settings-core-grid">
+                            <div className="settings-switch-card">
+                                <div>
+                                    <div style={{ fontSize: '14px', fontWeight: '600', color: 'var(--text-primary)' }}>开放注册</div>
+                                    <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                                        关闭后新用户无法自助注册
                                     </div>
                                 </div>
-                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px' }}>
-                                    <div className="form-group">
-                                        <label className="form-label">Stream Timeout (ms)</label>
-                                        <input
-                                            data-testid="settings-stream-timeout"
-                                            type="number"
-                                            className="form-input"
-                                            value={form.streamTimeout}
-                                            onChange={(event) => handleChange('streamTimeout', event.target.value)}
-                                        />
-                                    </div>
-                                    <div className="form-group">
-                                        <label className="form-label">Retry Limit</label>
-                                        <input
-                                            data-testid="settings-retry-limit"
-                                            type="number"
-                                            className="form-input"
-                                            value={form.retryLimit}
-                                            onChange={(event) => handleChange('retryLimit', event.target.value)}
-                                        />
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    )}
-
-                    {activeTab === 'auth' && (
-                        <div className="chart-card">
-                            <h3 style={{ fontSize: '18px', fontWeight: '700', marginBottom: '24px', display: 'flex', alignItems: 'center', gap: '10px' }}>
-                                <Lock size={20} color="var(--primary-tech)" /> Authentication
-                            </h3>
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-                                <div
-                                    style={{
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        justifyContent: 'space-between',
-                                        padding: '16px',
-                                        borderRadius: '12px',
-                                        border: '1px solid var(--border-color)',
-                                        background: 'rgba(255,255,255,0.01)',
-                                    }}
+                                <button
+                                    type="button"
+                                    data-testid="settings-registration-open"
+                                    className={`settings-switch ${form.registrationOpen ? 'is-on' : 'is-off'}`}
+                                    aria-pressed={form.registrationOpen}
+                                    onClick={() => handleChange('registrationOpen', !form.registrationOpen)}
                                 >
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                                        <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: form.registrationOpen ? '#10b981' : '#ef4444' }} />
-                                        <span style={{ fontSize: '14px', fontWeight: '600' }}>Registration Open</span>
-                                    </div>
-                                    <div
-                                        data-testid="settings-registration-open"
-                                        onClick={() => handleChange('registrationOpen', !form.registrationOpen)}
-                                        style={{
-                                            width: '40px',
-                                            height: '20px',
-                                            background: form.registrationOpen ? 'var(--primary-tech)' : 'rgba(255,255,255,0.1)',
-                                            borderRadius: '10px',
-                                            position: 'relative',
-                                            cursor: 'pointer',
-                                        }}
-                                    >
-                                        <div
-                                            style={{
-                                                width: '16px',
-                                                height: '16px',
-                                                background: '#000',
-                                                borderRadius: '50%',
-                                                position: 'absolute',
-                                                right: form.registrationOpen ? '2px' : 'auto',
-                                                left: form.registrationOpen ? 'auto' : '2px',
-                                                top: '2px',
-                                            }}
-                                        />
-                                    </div>
-                                </div>
-                                <div className="form-group">
-                                    <label className="form-label">Default Group</label>
-                                    <select
-                                        data-testid="settings-default-group"
-                                        className="form-input"
-                                        value={form.defaultGroup}
-                                        onChange={(event) => handleChange('defaultGroup', event.target.value)}
-                                    >
-                                        <option>Default</option>
-                                        <option>Free-Tier</option>
-                                        <option>VIP</option>
-                                    </select>
-                                </div>
+                                    <span className="settings-switch-knob" />
+                                </button>
+                            </div>
+
+                             <div className="form-group">
+                                <label className="form-label" htmlFor="settings-default-group">默认分组</label>
+                                <select
+                                    id="settings-default-group"
+                                    data-testid="settings-default-group"
+                                    className="form-input"
+                                    value={form.defaultGroup}
+                                    onChange={(event) => handleChange('defaultGroup', event.target.value)}
+                                    style={{ background: 'var(--surface-secondary)', color: 'var(--text-primary)', border: '1px solid var(--border-color)', borderRadius: '8px', cursor: 'pointer' }}
+                                >
+                                    {availableGroups.map(name => (
+                                        <option key={name} value={name}>{name}</option>
+                                    ))}
+                                </select>
                             </div>
                         </div>
-                    )}
-
-                    {(activeTab === 'email' || activeTab === 'security' || activeTab === 'advance') && (
-                        <div className="chart-card" style={{ textAlign: 'center', padding: '48px' }}>
-                            <Settings size={48} color="var(--text-muted)" style={{ marginBottom: '16px' }} className="spin" />
-                            <h3 style={{ color: '#fff' }}>{tabs.find((item) => item.id === activeTab)?.label} panel is in visual preview</h3>
-                            <p style={{ color: 'var(--text-muted)' }}>Persistence is validated through the General, API, and Auth tabs.</p>
-                        </div>
-                    )}
+                    </div>
 
                     {(saveError || saved) && (
                         <div
@@ -291,23 +187,22 @@ export default function SettingsPage() {
                             }}
                         >
                             {saveError ? <AlertCircle size={18} /> : <CheckCircle2 size={18} />}
-                            <span>{saveError || 'Settings saved successfully'}</span>
+                            <span>{saveError || '设置保存成功'}</span>
                         </div>
                     )}
 
-                    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', marginTop: 'auto' }}>
-                        <button className="select-control" style={{ padding: '12px 24px' }} type="button">Reset Preview</button>
+                    <div className="settings-save-row">
                         <button
                             data-testid="settings-save"
                             className="btn-primary"
                             onClick={handleSave}
                             disabled={saving}
-                            style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '12px 32px', justifyContent: 'center', minWidth: '170px' }}
+                            style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '12px 28px', justifyContent: 'center', minWidth: '168px' }}
                         >
-                            {saving ? <span>Saving...</span> : (
+                            {saving ? <span>保存中...</span> : (
                                 <>
-                                    <Save size={20} />
-                                    <span>Save Settings</span>
+                                    <Save size={18} />
+                                    <span>保存设置</span>
                                 </>
                             )}
                         </button>

@@ -48,14 +48,14 @@ public final class PasswordHashSupport {
             SecretKeyFactory factory = SecretKeyFactory.getInstance(ALGORITHM);
             return factory.generateSecret(spec).getEncoded();
         } catch (GeneralSecurityException ex) {
-            throw new IllegalStateException("Unable to hash password", ex);
+            throw new IllegalStateException("密码哈希失败", ex);
         }
     }
 
     private static char[] requirePassword(String password) {
-        String value = ValidationSupport.requireNotBlank(password, "Password is required");
+        String value = ValidationSupport.requireNotBlank(password, "密码不能为空");
         if (value.length() < 10) {
-            throw new IllegalArgumentException("Password must contain at least 10 characters");
+            throw new IllegalArgumentException("密码长度不能少于 10 位");
         }
         return value.toCharArray();
     }

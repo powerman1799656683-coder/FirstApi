@@ -11,12 +11,12 @@ public class AuthProperties {
     private boolean secureCookie = false;
     private String sameSite = "Strict";
     private String adminUsername = "admin";
-    private String adminDisplayName = "Admin User";
+    private String adminDisplayName = "管理员";
     private String adminEmail = "admin@example.com";
     private String adminPassword = "change-me-before-public-deploy";
     private boolean userEnabled = false;
     private String userUsername = "member";
-    private String userDisplayName = "Member User";
+    private String userDisplayName = "普通用户";
     private String userEmail = "member@example.com";
     private String userPassword = "";
 

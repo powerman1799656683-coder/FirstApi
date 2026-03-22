@@ -1,0 +1,15 @@
+{
+  "cookies": [
+    {
+      "name": "FIRSTAPI_SESSION",
+      "value": "4afe776cc592438ea45af24fc8f8b19f",
+      "domain": "127.0.0.1",
+      "path": "/",
+      "expires": 1773784566.872222,
+      "httpOnly": true,
+      "secure": false,
+      "sameSite": "Strict"
+    }
+  ],
+  "origins": []
+}

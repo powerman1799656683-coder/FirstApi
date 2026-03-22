@@ -48,12 +48,12 @@ async function executeRequest(url, options, method, meta) {
                     if (res.status === 401 && !requestMeta.allowUnauthorized && !requestMeta.skipUnauthorizedEvent) {
                         emitUnauthorized(url);
                     }
-                    throw new Error(res.ok ? 'Request failed' : `HTTP ${res.status}`);
+                    throw new Error(res.ok ? '请求失败' : `请求失败（HTTP ${res.status}）`);
                 }
             }
 
             if (!res.ok || !json || !json.success) {
-                const message = json?.message || `HTTP ${res.status}`;
+                const message = json?.message || `请求失败（HTTP ${res.status}）`;
                 if (res.status === 401 && !requestMeta.allowUnauthorized && !requestMeta.skipUnauthorizedEvent) {
                     emitUnauthorized(url);
                 }
@@ -67,6 +67,9 @@ async function executeRequest(url, options, method, meta) {
 
             return json.data;
         } catch (error) {
+            if (error.name === 'AbortError') {
+                throw error;
+            }
             if (attempt < MAX_GET_RETRIES && shouldRetry(method, 0, true)) {
                 attempt += 1;
                 await sleep(RETRY_DELAY_MS);
@@ -82,7 +85,7 @@ async function request(url, options = {}, meta = {}) {
     const bodyKey = typeof options.body === 'string' ? options.body : (options.body ? JSON.stringify(options.body) : '');
     const requestKey = `${method}:${url}:${bodyKey}`;
 
-    if (pendingRequests.has(requestKey)) {
+    if (pendingRequests.has(requestKey) && method === 'GET') {
         return pendingRequests.get(requestKey);
     }
 
@@ -90,7 +93,9 @@ async function request(url, options = {}, meta = {}) {
         pendingRequests.delete(requestKey);
     });
 
-    pendingRequests.set(requestKey, pending);
+    if (method === 'GET') {
+        pendingRequests.set(requestKey, pending);
+    }
     return pending;
 }
 
@@ -100,3 +105,4 @@ export const api = {
     put: (url, body, meta) => request(url, { method: 'PUT', body: JSON.stringify(body) }, meta),
     del: (url, meta) => request(url, { method: 'DELETE' }, meta),
 };
+

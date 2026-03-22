@@ -25,6 +25,6 @@ public class MySubscriptionController {
 
     @PostMapping("/renew")
     public ApiResponse<MySubscriptionData> renew() {
-        return ApiResponse.ok("renewed", service.renew());
+        return ApiResponse.ok("续费成功", service.renew());
     }
 }

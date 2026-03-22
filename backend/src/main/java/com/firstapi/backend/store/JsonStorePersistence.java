@@ -1,12 +1,10 @@
 package com.firstapi.backend.store;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.JavaType;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.JavaType;
+import tools.jackson.databind.ObjectMapper;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
-
-import java.io.IOException;
 import java.util.Collections;
 import java.util.List;
 
@@ -95,24 +93,24 @@ public class JsonStorePersistence {
     private String writeValue(Object value) {
         try {
             return objectMapper.writeValueAsString(value);
-        } catch (JsonProcessingException ex) {
-            throw new IllegalStateException("Failed to serialize store value", ex);
+        } catch (JacksonException ex) {
+            throw new IllegalStateException("存储数据序列化失败", ex);
         }
     }
 
     private <T> T readValue(String payload, Class<T> type) {
         try {
             return objectMapper.readValue(payload, type);
-        } catch (IOException ex) {
-            throw new IllegalStateException("Failed to deserialize store value", ex);
+        } catch (JacksonException ex) {
+            throw new IllegalStateException("存储数据反序列化失败", ex);
         }
     }
 
     private <T> T readValue(String payload, JavaType type) {
         try {
             return objectMapper.readValue(payload, type);
-        } catch (IOException ex) {
-            throw new IllegalStateException("Failed to deserialize store value", ex);
+        } catch (JacksonException ex) {
+            throw new IllegalStateException("存储数据反序列化失败", ex);
         }
     }
 }

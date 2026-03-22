@@ -1,6 +1,15 @@
 server:
   port: 8080
   forward-headers-strategy: framework
+  servlet:
+    encoding:
+      charset: UTF-8
+      force-request: true
+      force-response: true
+  tomcat:
+    max-http-form-post-size: 2MB
+    max-swallow-size: 2MB
+  max-http-request-header-size: 8KB
 
 spring:
   datasource:
@@ -32,3 +41,9 @@ app:
     user-password: ${FIRSTAPI_USER_PASSWORD:}
   security:
     data-secret: ${FIRSTAPI_DATA_SECRET:local-dev-data-secret-change-me}
+  relay:
+    openai-base-url: ${FIRSTAPI_RELAY_OPENAI_BASE_URL:https://api.openai.com}
+    claude-base-url: ${FIRSTAPI_RELAY_CLAUDE_BASE_URL:https://api.anthropic.com}
+    anthropic-version: ${FIRSTAPI_RELAY_ANTHROPIC_VERSION:2023-06-01}
+    connect-timeout-ms: ${FIRSTAPI_RELAY_CONNECT_TIMEOUT_MS:30000}
+    read-timeout-ms: ${FIRSTAPI_RELAY_READ_TIMEOUT_MS:120000}

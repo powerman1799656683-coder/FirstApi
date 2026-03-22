@@ -4,7 +4,7 @@ import com.firstapi.backend.model.UserItem;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
-import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 
 @Repository
@@ -30,10 +30,7 @@ public class UserRepository extends JdbcListRepository<UserItem> {
 
     @Override
     protected List<UserItem> defaultItems() {
-        return Arrays.asList(
-                new UserItem(22L, "check123@gmail.com", "check123", "$988.69", "Default", "用户", "正常", "2026/03/12"),
-                new UserItem(21L, "atawubop75@gmail.com", "atawubop75", "$0.00", "VIP", "用户", "正常", "2026/03/11")
-        );
+        return Collections.emptyList();
     }
 
     @Override

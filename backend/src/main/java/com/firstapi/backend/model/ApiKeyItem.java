@@ -18,6 +18,8 @@ public class ApiKeyItem implements SimpleStore.Identifiable {
     private String created;
     private String status;
     private String lastUsed;
+    private Long groupId;
+    private String groupName;
 
     public ApiKeyItem() {}
 
@@ -48,15 +50,22 @@ public class ApiKeyItem implements SimpleStore.Identifiable {
     public void setStatus(String status) { this.status = status; }
     public String getLastUsed() { return lastUsed; }
     public void setLastUsed(String lastUsed) { this.lastUsed = lastUsed; }
+    public Long getGroupId() { return groupId; }
+    public void setGroupId(Long groupId) { this.groupId = groupId; }
+    public String getGroupName() { return groupName; }
+    public void setGroupName(String groupName) { this.groupName = groupName; }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     public static class Request {
         private String name;
         private String status;
+        private Long groupId;
 
         public String getName() { return name; }
         public void setName(String name) { this.name = name; }
         public String getStatus() { return status; }
         public void setStatus(String status) { this.status = status; }
+        public Long getGroupId() { return groupId; }
+        public void setGroupId(Long groupId) { this.groupId = groupId; }
     }
 }

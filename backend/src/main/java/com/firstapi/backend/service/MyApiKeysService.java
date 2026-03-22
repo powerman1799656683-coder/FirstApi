@@ -4,6 +4,8 @@ import com.firstapi.backend.common.CurrentSessionHolder;
 import com.firstapi.backend.common.PageResponse;
 import com.firstapi.backend.model.ApiKeyItem;
 import com.firstapi.backend.model.AuthenticatedUser;
+import com.firstapi.backend.model.GroupItem;
+import com.firstapi.backend.repository.GroupRepository;
 import com.firstapi.backend.repository.MyApiKeysRepository;
 import com.firstapi.backend.util.TimeSupport;
 import com.firstapi.backend.util.ValidationSupport;
@@ -11,8 +13,10 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -20,11 +24,19 @@ import java.util.stream.Collectors;
 public class MyApiKeysService {
 
     private final MyApiKeysRepository repository;
+    private final GroupRepository groupRepository;
     private final SensitiveDataService sensitiveDataService;
 
-    public MyApiKeysService(MyApiKeysRepository repository, SensitiveDataService sensitiveDataService) {
+    public MyApiKeysService(MyApiKeysRepository repository, GroupRepository groupRepository, SensitiveDataService sensitiveDataService) {
         this.repository = repository;
+        this.groupRepository = groupRepository;
         this.sensitiveDataService = sensitiveDataService;
+    }
+
+    public PageResponse<ApiKeyItem> listByUserId(Long userId) {
+        List<ApiKeyItem> items = repository.findAllByOwnerId(userId);
+        Map<Long, String> groupNameMap = loadGroupNameMap();
+        return new PageResponse<>(items.stream().map(item -> toResponse(item, false, groupNameMap)).collect(Collectors.toList()));
     }
 
     public PageResponse<ApiKeyItem> list(String keyword) {
@@ -35,36 +47,62 @@ public class MyApiKeysService {
                     .filter(item -> contains(item.getName(), keyword))
                     .collect(Collectors.toList());
         }
-        return new PageResponse<ApiKeyItem>(items.stream().map(item -> toResponse(item, false)).collect(Collectors.toList()));
+        Map<Long, String> groupNameMap = loadGroupNameMap();
+        return new PageResponse<>(items.stream().map(item -> toResponse(item, false, groupNameMap)).collect(Collectors.toList()));
     }
 
     public ApiKeyItem get(Long id) {
-        return toResponse(requireOwned(id), false);
+        return toResponse(requireOwned(id), false, loadGroupNameMap());
     }
+
+    public ApiKeyItem revealKey(Long id) {
+        return toResponse(requireOwned(id), true, loadGroupNameMap());
+    }
+
+    private static final int MAX_KEYS_PER_USER = 10;
 
     public ApiKeyItem create(ApiKeyItem.Request request) {
         AuthenticatedUser user = CurrentSessionHolder.require();
+        long currentCount = repository.countByOwnerId(user.getId());
+        if (currentCount >= MAX_KEYS_PER_USER) {
+            throw new IllegalArgumentException("每个用户最多创建 " + MAX_KEYS_PER_USER + " 个 API 密钥");
+        }
+        if (request.getGroupId() == null) {
+            throw new IllegalArgumentException("请选择分组");
+        }
+        GroupItem group = groupRepository.findById(request.getGroupId());
+        if (group == null) {
+            throw new IllegalArgumentException("所选分组不存在");
+        }
         ApiKeyItem item = new ApiKeyItem();
         item.setOwnerId(user.getId());
-        item.setName(ValidationSupport.requireNotBlank(request.getName(), "API key name is required"));
+        item.setGroupId(request.getGroupId());
+        item.setName(ValidationSupport.requireNotBlank(request.getName(), "API 密钥名称不能为空"));
         item.setKey(sensitiveDataService.protect(generateKey()));
         item.setCreated(TimeSupport.nowDateTime());
         item.setStatus(emptyAsDefault(request.getStatus(), "正常"));
         item.setLastUsed("-");
         repository.save(item);
-        return toResponse(item, true);
+        return toResponse(item, true, loadGroupNameMap());
     }
 
     public ApiKeyItem update(Long id, ApiKeyItem.Request request) {
         ApiKeyItem current = requireOwned(id);
         if (request.getName() != null) {
-            current.setName(ValidationSupport.requireNotBlank(request.getName(), "API key name is required"));
+            current.setName(ValidationSupport.requireNotBlank(request.getName(), "API 密钥名称不能为空"));
         }
         if (request.getStatus() != null) {
             current.setStatus(request.getStatus());
         }
+        if (request.getGroupId() != null) {
+            GroupItem group = groupRepository.findById(request.getGroupId());
+            if (group == null) {
+                throw new IllegalArgumentException("所选分组不存在");
+            }
+            current.setGroupId(request.getGroupId());
+        }
         repository.update(current);
-        return toResponse(current, false);
+        return toResponse(current, false, loadGroupNameMap());
     }
 
     public void delete(Long id) {
@@ -78,43 +116,72 @@ public class MyApiKeysService {
         item.setKey(sensitiveDataService.protect(generateKey()));
         item.setLastUsed("-");
         repository.update(item);
-        return toResponse(item, true);
+        return toResponse(item, true, loadGroupNameMap());
     }
 
     private ApiKeyItem requireOwned(Long id) {
         AuthenticatedUser user = CurrentSessionHolder.require();
         ApiKeyItem item = repository.findByIdAndOwnerId(id, user.getId());
         if (item == null) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Api key not found");
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "API 密钥不存在");
         }
         return item;
     }
 
-    private ApiKeyItem toResponse(ApiKeyItem source, boolean revealFullKey) {
-        String plainTextKey = sensitiveDataService.reveal(source.getKey());
+    private Map<Long, String> loadGroupNameMap() {
+        Map<Long, String> map = new HashMap<>();
+        for (GroupItem g : groupRepository.findAll()) {
+            if (g.getId() != null && g.getName() != null) {
+                map.put(g.getId(), g.getName());
+            }
+        }
+        return map;
+    }
+
+    private ApiKeyItem toResponse(ApiKeyItem source, boolean revealFullKey, Map<Long, String> groupNameMap) {
+        String plainTextKey;
+        try {
+            plainTextKey = sensitiveDataService.reveal(source.getKey());
+        } catch (Exception e) {
+            plainTextKey = null;
+        }
         ApiKeyItem response = new ApiKeyItem();
         response.setId(source.getId());
         response.setOwnerId(source.getOwnerId());
+        response.setGroupId(source.getGroupId());
+        if (source.getGroupId() != null && groupNameMap != null) {
+            response.setGroupName(groupNameMap.get(source.getGroupId()));
+        }
         response.setName(source.getName());
         response.setCreated(source.getCreated());
-        response.setStatus(source.getStatus());
+        response.setStatus(normalizeStatus(source.getStatus()));
         response.setLastUsed(source.getLastUsed());
         response.setKeyPreview(maskKey(plainTextKey));
-        if (revealFullKey) {
+        if (revealFullKey && plainTextKey != null) {
             response.setPlainTextKey(plainTextKey);
         }
         return response;
     }
 
-    private String generateKey() {
-        return "sk-yc-" + UUID.randomUUID().toString().replace("-", "").substring(0, 20).toLowerCase(Locale.ROOT);
+    private String maskKey(String key) {
+        if (key == null) {
+            return "sk-****";
+        }
+        if (key.length() <= 10) {
+            return key.substring(0, Math.min(4, key.length())) + "****";
+        }
+        return key.substring(0, 10) + "..." + key.substring(key.length() - 4);
     }
 
-    private String maskKey(String key) {
-        if (key == null || key.length() < 12) {
-            return "********";
+    private String generateKey() {
+        return "sk-firstapi-" + UUID.randomUUID().toString().replace("-", "").substring(0, 20).toLowerCase(Locale.ROOT);
+    }
+
+    private String normalizeStatus(String status) {
+        if (status != null && status.indexOf('\uFFFD') >= 0) {
+            return "正常";
         }
-        return key.substring(0, 8) + "..." + key.substring(key.length() - 4);
+        return status;
     }
 
     private boolean isBlank(String s) {

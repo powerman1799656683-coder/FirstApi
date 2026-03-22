@@ -1,0 +1,26 @@
+# 修复点: 测试环境配置 - 使用H2内存数据库替代MySQL
+# 测试覆盖点: 为所有集成测试提供隔离的数据库环境
+spring:
+  datasource:
+    url: jdbc:h2:mem:testdb;DB_CLOSE_DELAY=-1;MODE=MySQL
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+  sql:
+    init:
+      mode: always
+      schema-locations: classpath:schema-test.sql
+
+app:
+  auth:
+    admin-username: admin
+    admin-display-name: 管理员
+    admin-email: admin@example.com
+    admin-password: AdminPass123!
+    user-enabled: true
+    user-username: member
+    user-display-name: 普通用户
+    user-email: member@example.com
+    user-password: UserPass123!
+  security:
+    data-secret: test-secret-key-for-testing

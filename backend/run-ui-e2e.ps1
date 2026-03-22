@@ -59,8 +59,8 @@ try {
     for ($i = 0; $i -lt 60; $i++) {
         Start-Sleep -Seconds 2
         try {
-            $resp = Invoke-WebRequest -Uri "http://127.0.0.1:$Port/api/admin/users" -UseBasicParsing -TimeoutSec 5
-            if ($resp.StatusCode -eq 200) {
+            $resp = Invoke-WebRequest -Uri "http://127.0.0.1:$Port/" -UseBasicParsing -TimeoutSec 5
+            if ($resp.StatusCode -ge 200 -and $resp.StatusCode -lt 500) {
                 $ready = $true
                 break
             }

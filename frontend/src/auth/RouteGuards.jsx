@@ -2,7 +2,6 @@ import React from 'react';
 import { Navigate, Outlet, useLocation } from 'react-router-dom';
 import { ShieldCheck } from 'lucide-react';
 import { useAuth } from './AuthContext';
-import Dashboard from '../pages/Dashboard';
 
 function FullScreenState({ title, detail }) {
     return (
@@ -10,7 +9,7 @@ function FullScreenState({ title, detail }) {
             <div className="auth-card auth-card--compact">
                 <div className="auth-badge">
                     <ShieldCheck size={18} />
-                    Session
+                    会话状态
                 </div>
                 <h1 className="auth-title" style={{ marginBottom: '10px' }}>{title}</h1>
                 <p className="auth-subtitle">{detail}</p>
@@ -24,7 +23,7 @@ export function RequireAuth() {
     const location = useLocation();
 
     if (loading) {
-        return <FullScreenState title="Checking session" detail="Validating your current sign-in state." />;
+        return <FullScreenState title="正在检查会话" detail="正在验证当前登录状态。" />;
     }
 
     if (!user) {
@@ -38,7 +37,7 @@ export function PublicOnlyRoute() {
     const { user, loading } = useAuth();
 
     if (loading) {
-        return <FullScreenState title="Loading" detail="Preparing the authentication state." />;
+        return <FullScreenState title="加载中" detail="正在准备认证状态。" />;
     }
 
     if (user) {
@@ -52,7 +51,7 @@ export function RequireRole({ role }) {
     const { user, loading } = useAuth();
 
     if (loading) {
-        return <FullScreenState title="Authorizing" detail="Checking access to this section." />;
+        return <FullScreenState title="权限校验中" detail="正在检查当前页面访问权限。" />;
     }
 
     if (!user) {
@@ -72,7 +71,7 @@ export function HomeIndex() {
         return null;
     }
     if (user.role === 'ADMIN') {
-        return <Dashboard />;
+        return <Navigate to="/monitor/accounts" replace />;
     }
     return <Navigate to="/my-api-keys" replace />;
 }

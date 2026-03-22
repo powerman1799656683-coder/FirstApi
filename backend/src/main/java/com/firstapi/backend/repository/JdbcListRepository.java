@@ -6,13 +6,17 @@ import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
 import org.springframework.jdbc.support.KeyHolder;
 
-import javax.annotation.PostConstruct;
+import jakarta.annotation.PostConstruct;
 import java.sql.PreparedStatement;
 import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.regex.Pattern;
 
 public abstract class JdbcListRepository<T extends SimpleStore.Identifiable> {
+
+    /** 仅允许字母、数字、下划线的标识符（防止 SQL 注入） */
+    private static final Pattern SAFE_IDENTIFIER = Pattern.compile("^[A-Za-z_][A-Za-z0-9_]{0,63}$");
 
     private final JdbcTemplate jdbcTemplate;
     private final RowMapper<T> rowMapper;
@@ -26,6 +30,11 @@ public abstract class JdbcListRepository<T extends SimpleStore.Identifiable> {
     protected JdbcListRepository(JdbcTemplate jdbcTemplate, String tableName, String[] columnNames, RowMapper<T> rowMapper) {
         this.jdbcTemplate = jdbcTemplate;
         this.rowMapper = rowMapper;
+
+        validateIdentifier(tableName, "表名");
+        for (String col : columnNames) {
+            validateIdentifier(col, "列名");
+        }
 
         String tableRef = "`" + tableName + "`";
         String columns = joinColumns(columnNames);
@@ -72,9 +81,9 @@ public abstract class JdbcListRepository<T extends SimpleStore.Identifiable> {
             return statement;
         }, keyHolder);
 
-        Number key = keyHolder.getKey();
+        Long key = GeneratedKeySupport.extractId(keyHolder);
         if (key != null) {
-            item.setId(key.longValue());
+            item.setId(key);
         }
         return item;
     }
@@ -87,6 +96,14 @@ public abstract class JdbcListRepository<T extends SimpleStore.Identifiable> {
 
     public synchronized void deleteById(Long id) {
         jdbcTemplate.update(deleteSql, id);
+    }
+
+    protected JdbcTemplate getJdbcTemplate() {
+        return jdbcTemplate;
+    }
+
+    protected RowMapper<T> getRowMapper() {
+        return rowMapper;
     }
 
     protected abstract List<T> defaultItems();
@@ -144,5 +161,11 @@ public abstract class JdbcListRepository<T extends SimpleStore.Identifiable> {
             builder.append("`").append(columnNames[i]).append("` = ?");
         }
         return builder.toString();
+    }
+
+    private static void validateIdentifier(String name, String label) {
+        if (name == null || !SAFE_IDENTIFIER.matcher(name).matches()) {
+            throw new IllegalArgumentException("不安全的" + label + ": " + name);
+        }
     }
 }

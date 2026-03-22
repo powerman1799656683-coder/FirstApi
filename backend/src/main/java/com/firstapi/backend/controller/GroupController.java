@@ -17,8 +17,12 @@ public class GroupController {
     }
 
     @GetMapping
-    public ApiResponse<PageResponse<GroupItem>> list(@RequestParam(value = "keyword", required = false) String keyword) {
-        return ApiResponse.ok(service.list(keyword));
+    public ApiResponse<PageResponse<GroupItem>> list(
+            @RequestParam(value = "keyword", required = false) String keyword,
+            @RequestParam(value = "platform", required = false) String platform,
+            @RequestParam(value = "status", required = false) String status,
+            @RequestParam(value = "groupType", required = false) String groupType) {
+        return ApiResponse.ok(service.list(keyword, platform, status, groupType));
     }
 
     @GetMapping("/{id}")
@@ -28,17 +32,17 @@ public class GroupController {
 
     @PostMapping
     public ApiResponse<GroupItem> create(@RequestBody GroupItem.Request req) {
-        return ApiResponse.ok("created", service.create(req));
+        return ApiResponse.ok("创建成功", service.create(req));
     }
 
     @PutMapping("/{id}")
     public ApiResponse<GroupItem> update(@PathVariable Long id, @RequestBody GroupItem.Request req) {
-        return ApiResponse.ok("updated", service.update(id, req));
+        return ApiResponse.ok("更新成功", service.update(id, req));
     }
 
     @DeleteMapping("/{id}")
     public ApiResponse<Boolean> delete(@PathVariable Long id) {
         service.delete(id);
-        return ApiResponse.ok("deleted", true);
+        return ApiResponse.ok("删除成功", true);
     }
 }

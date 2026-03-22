@@ -30,7 +30,7 @@ public class ProfileController {
 
     @PutMapping
     public ApiResponse<ProfileData> update(@RequestBody UpdateRequest request) {
-        return ApiResponse.ok("updated", service.updateProfile(request));
+        return ApiResponse.ok("更新成功", service.updateProfile(request));
     }
 
     @PostMapping("/change-password")
