@@ -23,9 +23,10 @@ export default function MyApiKeysPage() {
     const [keys, setKeys] = useState([]);
     const [keyword, setKeyword] = useState('');
     const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
-    const [formData, setFormData] = useState({ name: '' });
+    const [formData, setFormData] = useState({ name: '', groupId: '' });
     const [formError, setFormError] = useState('');
     const [secretState, setSecretState] = useState({ open: false, value: '', name: '', action: '' });
+    const [groups, setGroups] = useState([]);
 
     const loadData = (nextKeyword = keyword) => {
         api.get('/user/api-keys' + (nextKeyword ? '?keyword=' + encodeURIComponent(nextKeyword) : '')).then((data) => {
@@ -33,19 +34,30 @@ export default function MyApiKeysPage() {
         });
     };
 
+    const loadGroups = () => {
+        api.get('/user/api-keys/groups').then((data) => {
+            setGroups(data || []);
+        });
+    };
+
     useEffect(() => {
         loadData('');
+        loadGroups();
     }, []);
 
     const closeCreateModal = () => {
         setIsCreateModalOpen(false);
-        setFormData({ name: '' });
+        setFormData({ name: '', groupId: '' });
         setFormError('');
     };
 
     const handleSubmit = () => {
         setFormError('');
-        api.post('/user/api-keys', formData)
+        const payload = { name: formData.name };
+        if (formData.groupId) {
+            payload.groupId = Number(formData.groupId);
+        }
+        api.post('/user/api-keys', payload)
             .then((data) => {
                 closeCreateModal();
                 loadData();
@@ -57,7 +69,7 @@ export default function MyApiKeysPage() {
                 });
             })
             .catch((error) => {
-                setFormError(error.message || 'API key creation failed');
+                setFormError(error.message || '\u521b\u5efa API \u5bc6\u94a5\u5931\u8d25');
             });
     };
 
@@ -71,7 +83,7 @@ export default function MyApiKeysPage() {
             setSecretState({
                 open: true,
                 value: data.plainTextKey || '',
-                name: data.name || 'API key',
+                name: data.name || 'API \u5bc6\u94a5',
                 action: 'rotated',
             });
         });
@@ -91,7 +103,7 @@ export default function MyApiKeysPage() {
                         <Search size={16} color="var(--text-muted)" />
                         <input
                             type="text"
-                            placeholder="Search API key name..."
+                            placeholder={'\u641c\u7d22 API \u5bc6\u94a5\u540d\u79f0...'}
                             value={keyword}
                             onChange={handleSearch}
                             style={{ background: 'transparent', border: 'none', color: '#fff', outline: 'none', fontSize: '13px' }}
@@ -101,13 +113,13 @@ export default function MyApiKeysPage() {
                 <button
                     className="btn-primary"
                     onClick={() => {
-                        setFormData({ name: '' });
+                        setFormData({ name: '', groupId: '' });
                         setFormError('');
                         setIsCreateModalOpen(true);
                     }}
                     style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
                 >
-                    <Plus size={18} /> Create API Key
+                    <Plus size={18} /> {'\u521b\u5efa API \u5bc6\u94a5'}
                 </button>
             </div>
 
@@ -115,12 +127,13 @@ export default function MyApiKeysPage() {
                 <table style={{ width: '100%' }}>
                     <thead>
                         <tr>
-                            <th>Name</th>
-                            <th>Preview</th>
-                            <th>Status</th>
-                            <th>Last Used</th>
-                            <th>Created</th>
-                            <th>Actions</th>
+                            <th>{'\u540d\u79f0'}</th>
+                            <th>{'\u9884\u89c8'}</th>
+                            <th>{'\u5206\u7ec4'}</th>
+                            <th>{'\u72b6\u6001'}</th>
+                            <th>{'\u6700\u540e\u4f7f\u7528'}</th>
+                            <th>{'\u521b\u5efa\u65f6\u95f4'}</th>
+                            <th>{'\u64cd\u4f5c'}</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -128,8 +141,9 @@ export default function MyApiKeysPage() {
                             <tr key={item.id} className="table-row-hover">
                                 <td style={{ fontWeight: '600', color: 'var(--primary-tech)' }}>{item.name}</td>
                                 <td style={{ fontFamily: 'monospace', color: 'var(--text-muted)' }}>
-                                    {item.keyPreview || 'Hidden'}
+                                    {item.keyPreview || '\u5df2\u9690\u85cf'}
                                 </td>
+                                <td>{item.groupName || '-'}</td>
                                 <td>
                                     <span
                                         style={{
@@ -144,7 +158,7 @@ export default function MyApiKeysPage() {
                                         {item.status}
                                     </span>
                                 </td>
-                                <td>{item.lastUsed}</td>
+                                <td>{item.lastUsed || '-'}</td>
                                 <td style={{ color: 'var(--text-muted)', fontSize: '12px' }}>{item.created}</td>
                                 <td>
                                     <div style={{ display: 'flex', gap: '16px', color: 'var(--text-muted)' }}>
@@ -155,7 +169,7 @@ export default function MyApiKeysPage() {
                                             onClick={() => handleRotate(item.id)}
                                         >
                                             <RefreshCw size={14} />
-                                            <span style={{ fontSize: '10px' }}>Rotate</span>
+                                            <span style={{ fontSize: '10px' }}>{'\u8f6e\u6362'}</span>
                                         </button>
                                         <button
                                             className="nav-item nav-item--button"
@@ -164,7 +178,7 @@ export default function MyApiKeysPage() {
                                             onClick={() => handleDelete(item.id)}
                                         >
                                             <Trash2 size={14} />
-                                            <span style={{ fontSize: '10px' }}>Delete</span>
+                                            <span style={{ fontSize: '10px' }}>{'\u5220\u9664'}</span>
                                         </button>
                                     </div>
                                 </td>
@@ -177,23 +191,23 @@ export default function MyApiKeysPage() {
             <div style={{ marginTop: '32px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px' }}>
                 <div className="chart-card">
                     <h3 style={{ fontSize: '16px', fontWeight: '700', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <ShieldCheck size={18} color="var(--primary-tech)" /> Security Tips
+                        <ShieldCheck size={18} color="var(--primary-tech)" /> {'\u5b89\u5168\u63d0\u793a'}
                     </h3>
                     <ul style={{ paddingLeft: '20px', color: 'var(--text-muted)', fontSize: '13px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                        <li>Full keys are only shown once when you create or rotate them.</li>
-                        <li>Store production keys in a password manager or secret vault.</li>
-                        <li>Rotate unused keys regularly and delete anything you no longer need.</li>
-                        <li>Never paste a key into chat, screenshots, or public repos.</li>
+                        <li>{'\u5b8c\u6574\u5bc6\u94a5\u4ec5\u5728\u521b\u5efa\u6216\u8f6e\u6362\u65f6\u663e\u793a\u4e00\u6b21\u3002'}</li>
+                        <li>{'\u8bf7\u5c06\u751f\u4ea7\u5bc6\u94a5\u5b58\u50a8\u5728\u5bc6\u7801\u7ba1\u7406\u5668\u6216\u5bc6\u94a5\u4fdd\u7ba1\u5e93\u4e2d\u3002'}</li>
+                        <li>{'\u5b9a\u671f\u8f6e\u6362\u672a\u4f7f\u7528\u7684\u5bc6\u94a5\uff0c\u5220\u9664\u4e0d\u518d\u9700\u8981\u7684\u5bc6\u94a5\u3002'}</li>
+                        <li>{'\u5207\u52ff\u5c06\u5bc6\u94a5\u7c98\u8d34\u5230\u804a\u5929\u8bb0\u5f55\u3001\u622a\u56fe\u6216\u516c\u5f00\u4ed3\u5e93\u4e2d\u3002'}</li>
                     </ul>
                 </div>
                 <div className="chart-card">
                     <h3 style={{ fontSize: '16px', fontWeight: '700', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <Activity size={18} color="var(--primary-tech)" /> Capacity
+                        <Activity size={18} color="var(--primary-tech)" /> {'\u5bb9\u91cf'}
                     </h3>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                         <div>
                             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', fontSize: '13px' }}>
-                                <span>Created keys</span>
+                                <span>{'\u5df2\u521b\u5efa\u5bc6\u94a5'}</span>
                                 <span>{keys.length} / 10</span>
                             </div>
                             <div style={{ width: '100%', height: '8px', background: 'rgba(255,255,255,0.05)', borderRadius: '4px' }}>
@@ -201,7 +215,7 @@ export default function MyApiKeysPage() {
                             </div>
                         </div>
                         <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-                            Contact an administrator if you need a higher API key quota.
+                            {'\u5982\u9700\u66f4\u9ad8\u7684 API \u5bc6\u94a5\u914d\u989d\uff0c\u8bf7\u8054\u7cfb\u7ba1\u7406\u5458\u3002'}
                         </p>
                     </div>
                 </div>
@@ -210,34 +224,47 @@ export default function MyApiKeysPage() {
             <Modal
                 isOpen={isCreateModalOpen}
                 onClose={closeCreateModal}
-                title="Create API Key"
+                title={'\u521b\u5efa API \u5bc6\u94a5'}
                 error={formError}
                 footer={(
                     <>
-                        <button className="select-control" onClick={closeCreateModal}>Cancel</button>
-                        <button className="btn-primary" onClick={handleSubmit}>Create</button>
+                        <button className="select-control" onClick={closeCreateModal}>{'\u53d6\u6d88'}</button>
+                        <button className="btn-primary" onClick={handleSubmit}>{'\u521b\u5efa'}</button>
                     </>
                 )}
             >
                 <div className="form-group">
-                    <label className="form-label">Key Name</label>
+                    <label className="form-label">{'\u5bc6\u94a5\u540d\u79f0'}</label>
                     <input
                         type="text"
                         className="form-input"
-                        placeholder="For example: production-service or local-test"
+                        placeholder={'\u4f8b\u5982\uff1a\u751f\u4ea7\u670d\u52a1 \u6216 \u672c\u5730\u6d4b\u8bd5'}
                         value={formData.name}
                         onChange={(event) => setFormData({ ...formData, name: event.target.value })}
                     />
                 </div>
+                <div className="form-group">
+                    <label className="form-label">{'\u5206\u7ec4'}</label>
+                    <select
+                        className="form-input"
+                        value={formData.groupId}
+                        onChange={(event) => setFormData({ ...formData, groupId: event.target.value })}
+                    >
+                        <option value="">{'\u4e0d\u5206\u914d\u5206\u7ec4'}</option>
+                        {groups.map((g) => (
+                            <option key={g.id} value={g.id}>{g.name}{g.platform ? ` (${g.platform})` : ''}</option>
+                        ))}
+                    </select>
+                </div>
                 <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-                    The full token is shown only once after creation. Store it in a secure location.
+                    {'\u5b8c\u6574\u5bc6\u94a5\u4ec5\u5728\u521b\u5efa\u540e\u663e\u793a\u4e00\u6b21\uff0c\u8bf7\u5b58\u50a8\u5728\u5b89\u5168\u7684\u4f4d\u7f6e\u3002'}
                 </p>
             </Modal>
 
             <Modal
                 isOpen={secretState.open}
                 onClose={() => setSecretState({ open: false, value: '', name: '', action: '' })}
-                title={secretState.action === 'rotated' ? 'API Key Rotated' : 'API Key Created'}
+                title={secretState.action === 'rotated' ? 'API \u5bc6\u94a5\u5df2\u8f6e\u6362' : 'API \u5bc6\u94a5\u5df2\u521b\u5efa'}
                 footer={(
                     <>
                         <button
@@ -246,14 +273,14 @@ export default function MyApiKeysPage() {
                             type="button"
                         >
                             <Copy size={14} />
-                            Copy Key
+                            {'\u590d\u5236\u5bc6\u94a5'}
                         </button>
                         <button
                             className="btn-primary"
                             onClick={() => setSecretState({ open: false, value: '', name: '', action: '' })}
                             type="button"
                         >
-                            I Stored It
+                            {'\u5df2\u5b89\u5168\u4fdd\u5b58'}
                         </button>
                     </>
                 )}
@@ -264,7 +291,7 @@ export default function MyApiKeysPage() {
                         <span>{secretState.name}</span>
                     </div>
                     <div className="form-group" style={{ marginBottom: 0 }}>
-                        <label className="form-label">Full API Key</label>
+                        <label className="form-label">{'\u5b8c\u6574 API \u5bc6\u94a5'}</label>
                         <textarea
                             className="form-input"
                             style={{ minHeight: '120px', fontFamily: 'monospace' }}
@@ -273,8 +300,7 @@ export default function MyApiKeysPage() {
                         />
                     </div>
                     <p style={{ fontSize: '12px', color: '#fca5a5' }}>
-                        This is the only time the full key will be shown. If you lose it, rotate the key and store the
-                        new value.
+                        {'\u8fd9\u662f\u5b8c\u6574\u5bc6\u94a5\u552f\u4e00\u4e00\u6b21\u663e\u793a\u7684\u673a\u4f1a\u3002\u5982\u679c\u4e22\u5931\uff0c\u8bf7\u8f6e\u6362\u5bc6\u94a5\u5e76\u4fdd\u5b58\u65b0\u503c\u3002'}
                     </p>
                 </div>
             </Modal>
