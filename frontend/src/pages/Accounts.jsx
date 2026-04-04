@@ -16,7 +16,7 @@ import Select from '../components/Select';
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
 const PLATFORM_OPTIONS = ['OpenAI', 'Anthropic', 'Gemini', 'Antigravity'];
 const AUTH_METHOD_OPTIONS = ['OAuth', 'SetupToken', 'API Key'];
-const CREATE_AUTH_METHOD_OPTIONS = ['OAuth'];
+const CREATE_AUTH_METHOD_OPTIONS = ['OAuth', 'API Key'];
 const ACCOUNT_TYPE_MAP = {
     Anthropic: ['Claude Code', 'Claude Max'],
     OpenAI: ['ChatGPT Plus', 'ChatGPT Pro'],
@@ -116,21 +116,21 @@ function CopyableText({ text }) {
 function StatCard({ icon, iconColor, title, value, subtitle }) {
     return (
         <div style={{
-            flex: '1 1 0', minWidth: '180px', background: 'var(--bg-card)',
+            flex: '1 1 0', minWidth: '160px', background: 'var(--bg-card)',
             border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)',
-            padding: '20px', position: 'relative', overflow: 'hidden',
+            padding: '12px 16px', position: 'relative', overflow: 'hidden',
         }}>
             <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '1px', background: 'linear-gradient(90deg, transparent, var(--border-light), transparent)' }} />
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '12px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '6px' }}>
                 <div style={{
-                    width: '36px', height: '36px', borderRadius: 'var(--radius-md)',
+                    width: '30px', height: '30px', borderRadius: 'var(--radius-md)',
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                     background: `${iconColor}15`, border: `1px solid ${iconColor}30`, color: iconColor,
                 }}>{icon}</div>
                 <span style={{ fontSize: '12px', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>{title}</span>
             </div>
-            <div style={{ fontSize: '24px', fontWeight: 800, color: 'var(--text-primary)', fontFamily: "'JetBrains Mono', monospace", letterSpacing: '-1px' }}>{value}</div>
-            {subtitle && <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>{subtitle}</div>}
+            <div style={{ fontSize: '20px', fontWeight: 800, color: 'var(--text-primary)', fontFamily: "'JetBrains Mono', monospace", letterSpacing: '-1px' }}>{value}</div>
+            {subtitle && <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>{subtitle}</div>}
         </div>
     );
 }
@@ -235,6 +235,8 @@ export default function Accounts() {
     const [oauthResult, setOauthResult] = useState(null);
     const [selectedIds, setSelectedIds] = useState(new Set());
     const [allProxies, setAllProxies] = useState([]);
+    const [testingIds, setTestingIds] = useState(new Set());
+    const [testResult, setTestResult] = useState(null); // { account, success, message, data }
 
     const loadData = useCallback(() => {
         setIsLoading(true);
@@ -337,7 +339,8 @@ export default function Accounts() {
             expiryTime: account.expiryTime || '', autoSuspendExpiry: account.autoSuspendExpiry !== false,
             groupIds: account.groupIds || [],
         });
-        setFormError(''); setWizardStep(2); setOauthSession(null); setOauthResult(null);
+        const startStep = (account.authMethod === 'OAuth') ? 1 : 2;
+        setFormError(''); setWizardStep(startStep); setOauthSession(null); setOauthResult(null);
         setIsModalOpen(true);
     };
 
@@ -349,8 +352,40 @@ export default function Accounts() {
         api.del('/admin/accounts/' + id).then(() => loadData()).catch(err => alert(err.message || '操作失败'));
     };
 
-    const handleTest = (id) => {
-        api.post('/admin/accounts/' + id + '/test').then(() => loadData()).catch(err => alert(err.message || '测试失败'));
+    const handleTest = (account) => {
+        const id = account.id;
+        setTestingIds(prev => new Set(prev).add(id));
+        api.post('/admin/accounts/' + id + '/test')
+            .then(data => {
+                setTestingIds(prev => { const s = new Set(prev); s.delete(id); return s; });
+                // 根据 effectiveStatus 判断真实可用性，而非仅凭 HTTP 成功
+                const es = data.effectiveStatus || '';
+                const isUsable = es === '正常' || es === 'normal';
+                const isWarning = es === '高风险' || es === 'high_risk';
+                const isError = !isUsable && !isWarning;
+                let message = '';
+                if (isUsable) {
+                    message = '连通成功，账号状态正常，可正常调度使用';
+                } else if (isWarning) {
+                    message = '连通成功，但账号处于高风险状态，建议关注错误计数';
+                } else if (es === '额度冷却' || es === 'quota_cooldown') {
+                    message = '连通成功，但账号额度冷却中，暂时无法调度';
+                } else if (es === '已暂停' || es === 'paused') {
+                    message = '连通成功，但账号已被暂停调度（检测到致命错误）';
+                } else if (es === '已过期' || es === 'expired') {
+                    message = '连通成功，但账号 Token 已过期';
+                } else if (data.status === 'error') {
+                    message = '上游请求失败，账号不可用';
+                } else {
+                    message = '账号状态异常：' + (es || '未知');
+                }
+                setTestResult({ account, success: isUsable || isWarning, warning: isWarning, message, data });
+                loadData();
+            })
+            .catch(err => {
+                setTestingIds(prev => { const s = new Set(prev); s.delete(id); return s; });
+                setTestResult({ account, success: false, warning: false, message: err.message || '测试失败，网络或凭据异常', data: null });
+            });
     };
 
     const handleToggleSchedule = (account) => {
@@ -403,8 +438,7 @@ export default function Accounts() {
     const handleSubmit = () => {
         setFormError('');
         const payload = { ...formData };
-        if (!editingAccount) {
-            payload.authMethod = 'OAuth';
+        if (!editingAccount && payload.authMethod === 'OAuth') {
             delete payload.credential;
         }
         payload.weight = payload.weight ? parseInt(payload.weight, 10) : 1;
@@ -511,11 +545,14 @@ export default function Accounts() {
                         {accountTypes.map(t => <option key={t} value={t}>{t}</option>)}</Select></div>
             </div>
             <div className="form-group"><label className="form-label">认证方式</label>
-                <Select className="form-input" value={formData.authMethod} disabled
+                <Select className="form-input" value={formData.authMethod}
                     onChange={e => setFormData({ ...formData, authMethod: e.target.value })}>
                     {CREATE_AUTH_METHOD_OPTIONS.map(m => <option key={m} value={m}>{m}</option>)}</Select>
                 <span style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px', display: 'block' }}>
-                    浏览器授权后粘贴回调 URL 自动换取凭据                </span>
+                    {formData.authMethod === 'OAuth'
+                        ? '浏览器授权后粘贴回调 URL 自动换取凭据'
+                        : '直接填写官方 API Key（如 sk-ant-xxx、sk-xxx）'}
+                </span>
             </div>
             <div className="form-group"><label className="form-label">备注</label>
                 <textarea className="form-input" style={{ minHeight: '60px', resize: 'vertical' }} placeholder="可选备注" value={formData.notes || ''} onChange={e => setFormData({ ...formData, notes: e.target.value })} /></div>
@@ -591,10 +628,69 @@ export default function Accounts() {
 
     const renderCredentialFields = () => (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-            <div className="form-group"><label className="form-label">API Key / Setup Token</label>
-                <input type="text" className="form-input" placeholder="sk-..."
-                    value={formData.credential || ''} onChange={e => setFormData({ ...formData, credential: e.target.value })} />
-                <span style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px', display: 'block' }}>留空则不修改原有密钥</span></div>
+            {isOAuthAuth ? (
+                <>
+                    {!oauthSession && !oauthResult && (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                            <div style={{ padding: '12px 14px', borderRadius: '8px', background: 'var(--bg-secondary)', fontSize: '13px', color: 'var(--text-muted)' }}>
+                                当前凭据仍有效，无需重新授权可直接点击下一步。如需更新凭据（如 token 已过期），请点击重新授权。
+                            </div>
+                            <div style={{ textAlign: 'center' }}>
+                                <button className="btn-primary" onClick={handleOAuthStart} style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
+                                    <Link2 size={16} /> 重新授权
+                                </button>
+                            </div>
+                        </div>
+                    )}
+                    {oauthSession && !oauthResult && (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                            <div style={{ padding: '12px', borderRadius: '8px', background: 'rgba(196,77,255,0.05)', border: '1px solid rgba(196,77,255,0.15)' }}>
+                                <div style={{ fontSize: '12px', color: 'var(--primary-tech)', marginBottom: '8px', fontWeight: 600 }}>授权链接</div>
+                                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                                    <input type="text" className="form-input" readOnly value={oauthSession.authorizationUrl} style={{ flex: 1, fontSize: '11px' }} />
+                                    <button className="select-control" style={{ padding: '6px 12px', whiteSpace: 'nowrap' }}
+                                        onClick={() => { navigator.clipboard.writeText(oauthSession.authorizationUrl); window.open(oauthSession.authorizationUrl, '_blank'); }}>
+                                        <ExternalLink size={14} /> 打开
+                                    </button>
+                                </div>
+                                <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '6px' }}>失效时间: {oauthSession.expiresAt}</div>
+                            </div>
+                            <div className="form-group"><label className="form-label">粘贴浏览器回调地址</label>
+                                <input type="text" className="form-input" placeholder="粘贴完整回调 URL，系统会自动提取 code 并换取凭据" value={oauthCode} onChange={e => handleOAuthCodeInput(e.target.value)} />
+                                <span style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px', display: 'block' }}>完成浏览器授权后，直接粘贴地址栏 URL 即可自动完成换码</span>
+                            </div>
+                            {oauthExchanging && (
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', padding: '8px 0', color: 'var(--primary-tech)', fontSize: '13px' }}>
+                                    <RotateCcw size={16} className="spin" /> 正在自动换码...
+                                </div>
+                            )}
+                            {!oauthExchanging && oauthCode && !oauthCode.includes('code=') && (
+                                <button className="btn-primary" onClick={handleOAuthExchange}
+                                    style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+                                    <Zap size={16} /> 手动换码
+                                </button>
+                            )}
+                        </div>
+                    )}
+                    {oauthResult && (
+                        <div style={{ padding: '16px', borderRadius: '8px', background: 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.25)' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                                <CheckCircle2 size={18} color="#10b981" /><span style={{ fontWeight: 600, color: '#10b981' }}>凭据更新成功</span>
+                            </div>
+                            <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                                <div>凭据: <CopyableText text={oauthResult.credentialMask} /></div>
+                                <div>认证方式: {oauthResult.authMethod}</div>
+                            </div>
+                        </div>
+                    )}
+                </>
+            ) : (
+                <div className="form-group"><label className="form-label">API Key / Setup Token</label>
+                    <input type="text" className="form-input" placeholder="sk-..."
+                        value={formData.credential || ''} onChange={e => setFormData({ ...formData, credential: e.target.value })} />
+                    <span style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px', display: 'block' }}>留空则不修改原有密钥</span>
+                </div>
+            )}
         </div>
     );
 
@@ -674,7 +770,7 @@ export default function Accounts() {
 
     return (
         <div className="page-content">
-            <div style={{ display: 'flex', gap: '14px', marginBottom: '20px', flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', gap: '12px', marginBottom: '14px', flexWrap: 'wrap' }}>
                 <StatCard icon={<ShieldCheck size={18} />} iconColor="#3b82f6" title="总账号数" value={stats.total} subtitle="所有已添加账号" />
                 <StatCard icon={<Zap size={18} />} iconColor="#10b981" title="已启用" value={stats.enabled} subtitle="当前可用账号" />
                 <StatCard icon={<AlertTriangle size={18} />} iconColor="#ef4444" title="异常/停用" value={stats.disabled} subtitle="需要关注的账号" />
@@ -685,7 +781,7 @@ export default function Accounts() {
                 <div className="controls-group" style={{ flex: 1, flexWrap: 'wrap' }}>
                     <div className="select-control" style={{ width: '220px' }}>
                         <Search size={15} color="var(--text-muted)" />
-                        <input type="text" value={keyword} onChange={handleSearch}
+                        <input type="text" value={keyword} onChange={handleSearch} placeholder="搜索账号名称/备注"
                             style={{ background: 'transparent', border: 'none', color: '#fff', outline: 'none', fontSize: '13px', flex: 1 }} />
                     </div>
                     <Select className="select-control" value={filterPlatform} onChange={e => { setFilterPlatform(e.target.value); setCurrentPage(1); }}>
@@ -754,13 +850,13 @@ export default function Accounts() {
                                     <input type="checkbox" checked={selectedIds.size === displayedAccounts.length && displayedAccounts.length > 0}
                                         onChange={toggleSelectAll} style={{ cursor: 'pointer', accentColor: 'var(--primary-tech)' }} />
                                 </th>
+                                <th style={{ width: '46px' }}>ID</th>
                                 <th onClick={() => requestSort('name')} style={{ cursor: 'pointer' }}>名称 <SortIcon column="name" /></th>
                                 <th onClick={() => requestSort('platform')} style={{ cursor: 'pointer' }}>平台/类型 <SortIcon column="platform" /></th>
                                 <th>容量</th>
                                 <th onClick={() => requestSort('effectiveStatus')} style={{ cursor: 'pointer' }}>状态 <SortIcon column="effectiveStatus" /></th>
                                 <th onClick={() => requestSort('priorityValue')} style={{ cursor: 'pointer' }}>调度 <SortIcon column="priorityValue" /></th>
                                 <th onClick={() => requestSort('concurrency')} style={{ cursor: 'pointer' }}>并发数 <SortIcon column="concurrency" /></th>
-                                <th onClick={() => requestSort('billingRate')} style={{ cursor: 'pointer' }}>计费倍率 <SortIcon column="billingRate" /></th>
                                 <th onClick={() => requestSort('todayRequests')} style={{ cursor: 'pointer' }}>今日统计 <SortIcon column="todayRequests" /></th>
                                 <th>分组</th>
                                 <th>用量窗口</th>
@@ -773,6 +869,7 @@ export default function Accounts() {
                             ) : displayedAccounts.map(a => (
                                 <tr key={a.id} className="table-row-hover">
                                     <td><input type="checkbox" checked={selectedIds.has(a.id)} onChange={() => toggleSelection(a.id)} style={{ cursor: 'pointer', accentColor: 'var(--primary-tech)' }} /></td>
+                                    <td><span style={{ fontSize: '12px', fontFamily: "'JetBrains Mono', monospace", color: 'var(--text-muted)' }}>{a.id}</span></td>
                                     <td>
                                         <div>
                                             <span style={{ fontWeight: 600, fontSize: '13px' }}>{a.name}</span>
@@ -809,7 +906,6 @@ export default function Accounts() {
                                         </div>
                                     </td>
                                     <td><span style={{ fontSize: '12px', fontFamily: "'JetBrains Mono', monospace" }}>{a.concurrency ?? '-'}</span></td>
-                                    <td><span style={{ fontSize: '12px', fontFamily: "'JetBrains Mono', monospace" }}>{a.billingRate ?? '-'}</span></td>
                                     <td>
                                         <div style={{ fontSize: '11px', fontFamily: "'JetBrains Mono', monospace" }}>
                                             <div style={{ color: 'var(--text-primary)' }}>{(a.todayRequests || 0).toLocaleString()} 请求</div>
@@ -833,7 +929,7 @@ export default function Accounts() {
                                     <td>
                                         <div style={{ display: 'flex', gap: '4px' }}>
                                             <button className="action-btn" type="button" onClick={() => handleEdit(a)} title="编辑"><Edit3 size={14} /></button>
-                                            <button className="action-btn" type="button" onClick={() => handleTest(a.id)} title="测试"><TestTube size={14} /></button>
+                                            <button className="action-btn" type="button" onClick={() => handleTest(a)} title="测试可用性" disabled={testingIds.has(a.id)} style={testingIds.has(a.id) ? { opacity: 0.5, cursor: 'not-allowed' } : {}}>{testingIds.has(a.id) ? <span style={{ display: 'inline-block', width: 14, height: 14, border: '2px solid currentColor', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 0.6s linear infinite' }} /> : <TestTube size={14} />}</button>
                                             <button className="action-btn action-btn--danger" type="button" onClick={() => handleDelete(a.id)} title="删除"><Trash2 size={14} /></button>
                                         </div>
                                     </td>
@@ -874,6 +970,56 @@ export default function Accounts() {
                 }>
                 <StepIndicator steps={wizardSteps} current={wizardStep} />
                 {renderWizardContent()}
+            </Modal>
+
+            {/* 测试结果弹窗 */}
+            <Modal isOpen={!!testResult} onClose={() => setTestResult(null)} title="账号可用性测试"
+                footer={<div style={{ display: 'flex', justifyContent: 'flex-end' }}><button className="btn-primary" onClick={() => setTestResult(null)}>关闭</button></div>}>
+                {testResult && (() => {
+                    const d = testResult.data;
+                    const iconColor = testResult.success ? (testResult.warning ? '#f59e0b' : '#10b981') : '#ef4444';
+                    const IconComp = testResult.success ? (testResult.warning ? AlertTriangle : CheckCircle2) : XCircle;
+                    const titleText = testResult.success
+                        ? (testResult.warning ? '账号高风险' : '账号正常')
+                        : '账号不可用';
+                    const rows = [];
+                    if (d) {
+                        rows.push({ label: '有效状态', value: d.effectiveStatus || d.status || '-' });
+                        if (d.errors != null) rows.push({ label: '累计错误', value: d.errors + ' 次' + (d.errors >= 3 ? '（高风险）' : '') });
+                        if (d.authMethod) rows.push({ label: '认证方式', value: d.authMethod });
+                        if (d.platform) rows.push({ label: '平台', value: d.platform });
+                        if (d.tempDisabled) rows.push({ label: '调度状态', value: '⛔ 已暂停（检测到致命错误）', highlight: true });
+                        if (d.quotaExhausted) rows.push({ label: '额度状态', value: '⚠️ 额度冷却中', highlight: true });
+                        if (d.oauthTokenExpiresAt) rows.push({ label: 'Token 过期', value: d.oauthTokenExpiresAt });
+                        if (d.lastCheck) rows.push({ label: '测试时间', value: d.lastCheck });
+                    }
+                    return (
+                        <div style={{ padding: '8px 0' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '16px' }}>
+                                <IconComp size={28} color={iconColor} />
+                                <div>
+                                    <div style={{ fontWeight: 600, fontSize: '15px', color: iconColor }}>{titleText}</div>
+                                    <div style={{ fontSize: '13px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                                        {testResult.account.name} · {testResult.account.platform}
+                                    </div>
+                                </div>
+                            </div>
+                            <div style={{ background: 'var(--bg-secondary)', borderRadius: '8px', padding: '12px 14px', fontSize: '13px', color: 'var(--text-secondary)', marginBottom: rows.length ? '12px' : 0 }}>
+                                {testResult.message}
+                            </div>
+                            {rows.length > 0 && (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '7px' }}>
+                                    {rows.map(r => (
+                                        <div key={r.label} style={{ display: 'flex', gap: '8px', fontSize: '13px' }}>
+                                            <span style={{ color: 'var(--text-muted)', minWidth: '72px', flexShrink: 0 }}>{r.label}</span>
+                                            <span style={{ color: r.highlight ? '#f59e0b' : 'var(--text-primary)', fontWeight: r.highlight ? 600 : 400 }}>{r.value}</span>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    );
+                })()}
             </Modal>
         </div>
     );

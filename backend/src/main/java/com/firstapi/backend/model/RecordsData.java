@@ -39,9 +39,9 @@ public class RecordsData {
 
     public static class BarPoint {
         public String name;
-        public int tokens;
+        public double tokens;
 
-        public BarPoint(String name, int tokens) {
+        public BarPoint(String name, double tokens) {
             this.name = name;
             this.tokens = tokens;
         }

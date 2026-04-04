@@ -1,5 +1,35 @@
 # Progress Log
 
+## Session: 2026-03-30
+
+### Phase 1: Local Deployment Requirements
+- **Status:** complete
+- Actions taken:
+  - 读取仓库 `AGENTS.md`，确认本仓库的构建、测试和部署约束。
+  - 读取 `backend/DEPLOY.md`、`backend/pom.xml`、`frontend/package.json`、`backend/src/main/resources/application.yml` 的相关线索。
+  - 确认项目部署形态为 Vite 前端构建后拷贝进 Spring Boot 静态资源，再由后端统一提供服务。
+  - 确认远端部署最少需要 MySQL 和若干 `FIRSTAPI_*` / `MYSQL_*` 环境变量。
+
+### Phase 2: Remote Access Probe
+- **Status:** in_progress
+- Actions taken:
+  - 使用用户提供的 `root@185.200.64.83:2222` 通过 OpenSSH 探测，连接建立后立即被远端关闭。
+  - 使用 `plink` 复测，结果相同，说明不是单一 SSH 客户端实现问题。
+  - 对 `22` 与 `2222` 进行原始 TCP 探测，两个端口都没有返回 SSH banner。
+  - 对公网入口做侧探测，发现 `80/443` 存在响应，但 `80` 为 Empty reply，`443` TLS 握手也未正常完成。
+
+### Phase 3: Local Build Readiness
+- **Status:** complete
+- Actions taken:
+  - 使用本机 `npm.cmd` 构建 `frontend/dist`。
+  - 将前端构建产物复制到 `backend/src/main/resources/static`。
+  - 使用本机 Maven 与 JDK 25 打包新的 `backend/target/backend-0.0.1-SNAPSHOT.jar`。
+  - 复核产物时间戳，确认本地部署包已准备好。
+
+## Current Blockers
+- 无法获取可用 SSH shell，因此还不能盘点远端文件、进程、数据库和现有部署。
+- 在无法登录前，不能安全执行用户要求的“初始化”操作。
+
 ## Session: 2026-03-16
 
 ### Phase 1: Discovery
@@ -78,6 +108,34 @@
 | Claude non-stream smoke test | Real request through `8082` with supplied key | `200` OpenAI-style response | Upstream `401 authentication_error invalid x-api-key` | FAIL |
 | Claude stream smoke test | Real stream request through `8082` with supplied key | SSE chunks and `[DONE]` | Local `502 upstream_error` after upstream credential failure path | FAIL |
 | Cleanup verification | Query temp data and port `8082` | No temp rows, no listener | Temp rows removed and `8082` stopped listening | PASS |
+
+## Session: 2026-03-23
+
+### Phase 1: Billing Chain Discovery
+- **Status:** complete
+- Actions taken:
+  - 搜索 token / billing / balance / cost / usage 相关后端代码。
+  - 确认主扣费链路集中在 `RelayService`、`RelayRecordService`、`UserService`。
+  - 确认费用展示来自 `relay_records` 聚合，而不是独立账单表。
+
+### Phase 2: Pricing And Usage Audit
+- **Status:** complete
+- Actions taken:
+  - 审查 `CostCalculationService` 的费用公式与精度。
+  - 审查 `UpstreamHttpClient` 与 `ClaudeRelayAdapter` 的 usage 提取逻辑。
+  - 审查分组 `rate`、`billingType`、`billingAmount` 在扣费链的参与情况。
+
+### Phase 3: Consistency Audit
+- **Status:** in_progress
+- Actions taken:
+  - 审查余额预检查与实际扣减是否一致。
+  - 审查扣费异常是否会阻止调用记录落库。
+  - 审查现有测试覆盖缺口，准备输出问题清单与风险等级。
+
+### Verification Attempt
+- 将 `JAVA_HOME` 临时指向 `C:\Program Files\Microsoft\jdk-21.0.10.7-hotspot`。
+- 执行 `mvn -q '-Djava.version=21' '-Dtest=RelayRecordServiceTest,RelayServiceTest' test`。
+- 结果：失败，原因不是新增代码，而是现有 `target` 中存在 class file version 69（Java 25）编译产物，当前 JDK 21 无法执行这些旧产物。
 
 ## Error Log
 | Timestamp | Error | Attempt | Resolution |

@@ -19,6 +19,7 @@ public class AccountOAuthSession implements SimpleStore.Identifiable {
     private String exchangedAt;
     private String consumedAt;
     private Long createdBy;
+    private String encryptedRefreshToken;
 
     public AccountOAuthSession() {}
 
@@ -77,4 +78,6 @@ public class AccountOAuthSession implements SimpleStore.Identifiable {
     public void setConsumedAt(String consumedAt) { this.consumedAt = consumedAt; }
     public Long getCreatedBy() { return createdBy; }
     public void setCreatedBy(Long createdBy) { this.createdBy = createdBy; }
+    public String getEncryptedRefreshToken() { return encryptedRefreshToken; }
+    public void setEncryptedRefreshToken(String encryptedRefreshToken) { this.encryptedRefreshToken = encryptedRefreshToken; }
 }

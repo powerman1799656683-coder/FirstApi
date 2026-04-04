@@ -7,12 +7,12 @@ import {
     Edit2,
     Mail,
     User as UserIcon,
-    ShieldCheck,
     MoreVertical,
     Key,
-    Users as UsersIcon,
     Minus,
     Ban,
+    Copy,
+    Check,
 } from 'lucide-react';
 import Modal from '../components/Modal';
 import Toast from '../components/Toast';
@@ -37,14 +37,12 @@ export default function Users() {
     const [formError, setFormError] = useState('');
     const [isLoading, setIsLoading] = useState(false);
     const [sortConfig, setSortConfig] = useState({ key: 'id', direction: 'asc' });
-    const [filterGroup, setFilterGroup] = useState('all');
     const [filterStatus, setFilterStatus] = useState('all');
-    const [groupOptions, setGroupOptions] = useState([]);
     const [openMenuId, setOpenMenuId] = useState(null);
     const [openMenuDirection, setOpenMenuDirection] = useState('down');
     const [apiKeysModal, setApiKeysModal] = useState({ open: false, user: null, keys: [] });
-    const [groupModal, setGroupModal] = useState({ open: false, user: null, group: '' });
     const [balanceModal, setBalanceModal] = useState({ open: false, user: null, type: '', amount: '' });
+    const [copiedKeyId, setCopiedKeyId] = useState(null);
 
     useEffect(() => {
         const handleClickOutside = (e) => {
@@ -66,11 +64,10 @@ export default function Users() {
 
     const filteredUsers = React.useMemo(() => {
         return users.filter((user) => {
-            const matchesGroup = filterGroup === 'all' || user.group === filterGroup;
             const matchesStatus = filterStatus === 'all' || user.status === filterStatus;
-            return matchesGroup && matchesStatus;
+            return matchesStatus;
         });
-    }, [users, filterGroup, filterStatus]);
+    }, [users, filterStatus]);
 
     const sortedUsers = React.useMemo(() => {
         return [...filteredUsers].sort((a, b) => {
@@ -138,9 +135,6 @@ export default function Users() {
 
     useEffect(() => {
         loadData('', true);
-        api.get('/admin/groups').then(data => {
-            setGroupOptions((data.items || []).map(g => g.name));
-        }).catch(() => {});
         return () => {
             if (abortControllerRef.current) {
                 abortControllerRef.current.abort();
@@ -244,22 +238,6 @@ export default function Users() {
             .catch(err => setToast({ message: err.message || '加载失败', type: 'error' }));
     };
 
-    const handleShowGroupModal = (user) => {
-        setOpenMenuId(null);
-        setOpenMenuDirection('down');
-        setGroupModal({ open: true, user, group: user.group });
-    };
-
-    const handleGroupSubmit = () => {
-        api.put('/admin/users/' + groupModal.user.id, { group: groupModal.group })
-            .then(() => {
-                setToast({ message: '分组已更新', type: 'success' });
-                setGroupModal({ open: false, user: null, group: '' });
-                loadData(keyword);
-            })
-            .catch(err => setToast({ message: err.message || '操作失败', type: 'error' }));
-    };
-
     const handleShowBalanceModal = (user, type) => {
         setOpenMenuId(null);
         setOpenMenuDirection('down');
@@ -313,26 +291,13 @@ export default function Users() {
                             data-testid="users-search"
                             type="text"
                             autoComplete="off"
-                            placeholder=""
+                            placeholder="搜索用户名/邮箱"
                             value={keyword}
                             onChange={handleSearch}
                             style={{ background: 'transparent', border: 'none', color: '#fff', outline: 'none', fontSize: '13px' }}
                         />
                     </div>
                     <Select
-                        className="select-control"
-                        value={filterGroup}
-                        onChange={(e) => {
-                            setFilterGroup(e.target.value);
-                            setCurrentPage(1);
-                        }}
-                    >
-                        <option value="all">全部分组</option>
-                        {groupOptions.map(name => (
-                            <option key={name} value={name}>{name}</option>
-                        ))}
-                    </Select>
-                    <Select 
                         className="select-control"
                         value={filterStatus}
                         onChange={(e) => {
@@ -372,8 +337,11 @@ export default function Users() {
                             <th onClick={() => requestSort('balance')} style={{ cursor: 'pointer' }}>
                                 余额 {sortConfig.key === 'balance' && (sortConfig.direction === 'asc' ? <ChevronDown size={12} style={{ transform: 'rotate(180deg)' }} /> : <ChevronDown size={12} />)}
                             </th>
-                            <th onClick={() => requestSort('group')} style={{ cursor: 'pointer' }}>
-                                分组 {sortConfig.key === 'group' && (sortConfig.direction === 'asc' ? <ChevronDown size={12} style={{ transform: 'rotate(180deg)' }} /> : <ChevronDown size={12} />)}
+                            <th onClick={() => requestSort('loginIp')} style={{ cursor: 'pointer' }}>
+                                登录 IP {sortConfig.key === 'loginIp' && (sortConfig.direction === 'asc' ? <ChevronDown size={12} style={{ transform: 'rotate(180deg)' }} /> : <ChevronDown size={12} />)}
+                            </th>
+                            <th onClick={() => requestSort('loginLocation')} style={{ cursor: 'pointer' }}>
+                                位置 {sortConfig.key === 'loginLocation' && (sortConfig.direction === 'asc' ? <ChevronDown size={12} style={{ transform: 'rotate(180deg)' }} /> : <ChevronDown size={12} />)}
                             </th>
                             <th onClick={() => requestSort('time')} style={{ cursor: 'pointer' }}>
                                 最近登录 {sortConfig.key === 'time' && (sortConfig.direction === 'asc' ? <ChevronDown size={12} style={{ transform: 'rotate(180deg)' }} /> : <ChevronDown size={12} />)}
@@ -385,7 +353,7 @@ export default function Users() {
                         </tr>
                     </thead>
                     <tbody>
-                        {pagedUsers.length === 0 && <EmptyState colSpan={7} message="暂无用户数据" />}
+                        {pagedUsers.length === 0 && <EmptyState colSpan={8} message="暂无用户数据" />}
                         {pagedUsers.map((user) => (
                             <tr key={user.id} className="table-row-hover">
                                 <td style={{ color: 'var(--text-muted)', fontFamily: 'monospace' }}>#{user.id}</td>
@@ -406,14 +374,8 @@ export default function Users() {
                                     </div>
                                 </td>
                                 <td style={{ fontWeight: '700', color: 'var(--primary-tech)' }}>{user.balance}</td>
-                                <td>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                        <span style={{ padding: '2px 8px', borderRadius: '4px', background: 'rgba(59, 130, 246, 0.1)', color: '#3b82f6', fontSize: '11px', fontWeight: '600' }}>
-                                            {user.group}
-                                        </span>
-                                        {user.role === '管理员' && <ShieldCheck size={14} color="#f59e0b" />}
-                                    </div>
-                                </td>
+                                <td style={{ color: 'var(--text-muted)', fontSize: '12px', fontFamily: 'monospace' }}>{user.loginIp || '-'}</td>
+                                <td style={{ color: 'var(--text-muted)', fontSize: '12px' }}>{user.loginLocation || '-'}</td>
                                 <td style={{ color: 'var(--text-muted)', fontSize: '12px' }}>{user.time}</td>
                                 <td>
                                     <span style={{ color: '#10b981', background: 'rgba(16, 185, 129, 0.1)', padding: '2px 10px', borderRadius: '12px', fontSize: '11px', border: '1px solid rgba(16, 185, 129, 0.2)' }}>
@@ -453,7 +415,6 @@ export default function Users() {
                                                 }}>
                                                     {[
                                                         { icon: <Key size={14} />, label: 'API密钥', action: () => handleShowApiKeys(user) },
-                                                        { icon: <UsersIcon size={14} />, label: '分组', action: () => handleShowGroupModal(user) },
                                                         { icon: <Plus size={14} color="#10b981" />, label: '充值', color: '#10b981', action: () => handleShowBalanceModal(user, 'topup') },
                                                         { icon: <Minus size={14} color="#ef4444" />, label: '退款', color: '#ef4444', action: () => handleShowBalanceModal(user, 'refund') },
                                                     ].map((item, idx) => (
@@ -521,8 +482,8 @@ export default function Users() {
                                 <span className="stat-value" style={{ fontSize: '18px' }}>{viewingUser.balance}</span>
                             </div>
                             <div className="stat-card" style={{ padding: '12px' }}>
-                                <span className="stat-title" style={{ fontSize: '11px' }}>所属分组</span>
-                                <span className="stat-value" style={{ fontSize: '18px' }}>{viewingUser.group}</span>
+                                <span className="stat-title" style={{ fontSize: '11px' }}>登录 IP</span>
+                                <span className="stat-value" style={{ fontSize: '14px', fontFamily: 'monospace' }}>{viewingUser.loginIp || '-'}</span>
                             </div>
                         </div>
                     </div>
@@ -546,9 +507,9 @@ export default function Users() {
             {/* API 密钥弹窗 */}
             <Modal
                 isOpen={apiKeysModal.open}
-                onClose={() => setApiKeysModal({ open: false, user: null, keys: [] })}
+                onClose={() => { setApiKeysModal({ open: false, user: null, keys: [] }); setCopiedKeyId(null); }}
                 title="用户 API 密钥"
-                footer={<button className="select-control" onClick={() => setApiKeysModal({ open: false, user: null, keys: [] })}>关闭</button>}
+                footer={<button className="select-control" onClick={() => { setApiKeysModal({ open: false, user: null, keys: [] }); setCopiedKeyId(null); }}>关闭</button>}
             >
                 {apiKeysModal.user && (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
@@ -565,45 +526,50 @@ export default function Users() {
                             <div style={{ textAlign: 'center', padding: '24px 0', color: 'var(--text-muted)', fontSize: '13px' }}>该用户暂无 API 密钥</div>
                         ) : apiKeysModal.keys.map(key => (
                             <div key={key.id} style={{ padding: '14px 16px', borderRadius: '10px', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border-color)' }}>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
                                     <span style={{ fontWeight: '600', color: '#fff' }}>{key.name}</span>
                                     <span style={{ fontSize: '11px', padding: '1px 8px', borderRadius: '8px', background: 'rgba(16,185,129,0.1)', color: '#10b981', border: '1px solid rgba(16,185,129,0.2)' }}>{key.status}</span>
                                 </div>
-                                <div style={{ fontFamily: 'monospace', fontSize: '13px', color: 'var(--text-muted)', marginBottom: '6px' }}>{key.keyPreview}</div>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px', background: 'rgba(0,0,0,0.2)', borderRadius: '6px', padding: '6px 10px' }}>
+                                    <span style={{ fontFamily: 'monospace', fontSize: '12px', color: 'var(--text-muted)', flex: 1, wordBreak: 'break-all' }}>
+                                        {key.plainTextKey || key.keyPreview}
+                                    </span>
+                                    <span
+                                        onClick={() => {
+                                            const val = key.plainTextKey || key.keyPreview;
+                                            if (!val) return;
+                                            const copy = () => {
+                                                if (navigator.clipboard && window.isSecureContext) {
+                                                    return navigator.clipboard.writeText(val).then(() => true).catch(() => false);
+                                                }
+                                                const ta = document.createElement('textarea');
+                                                ta.value = val;
+                                                ta.style.position = 'fixed';
+                                                ta.style.left = '-9999px';
+                                                document.body.appendChild(ta);
+                                                ta.select();
+                                                try { document.execCommand('copy'); return Promise.resolve(true); }
+                                                catch { return Promise.resolve(false); }
+                                                finally { document.body.removeChild(ta); }
+                                            };
+                                            copy().then(ok => {
+                                                if (ok) {
+                                                    setCopiedKeyId(key.id);
+                                                    setTimeout(() => setCopiedKeyId(null), 1500);
+                                                }
+                                            });
+                                        }}
+                                        style={{ cursor: 'pointer', color: copiedKeyId === key.id ? '#10b981' : 'var(--text-muted)', flexShrink: 0, transition: 'color 0.2s' }}
+                                        title="复制密钥"
+                                    >
+                                        {copiedKeyId === key.id ? <Check size={14} /> : <Copy size={14} />}
+                                    </span>
+                                </div>
                                 <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-                                    分组: {apiKeysModal.user.group}&nbsp;&nbsp;&nbsp;&nbsp;创建时间: {key.created}
+                                    创建时间: {key.created}
                                 </div>
                             </div>
                         ))}
-                    </div>
-                )}
-            </Modal>
-
-            {/* 分组弹窗 */}
-            <Modal
-                isOpen={groupModal.open}
-                onClose={() => setGroupModal({ open: false, user: null, group: '' })}
-                title="修改用户分组"
-                footer={(
-                    <>
-                        <button className="select-control" onClick={() => setGroupModal({ open: false, user: null, group: '' })}>取消</button>
-                        <button className="btn-primary" onClick={handleGroupSubmit}>确认</button>
-                    </>
-                )}
-            >
-                {groupModal.user && (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                        <div style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
-                            用户: <span style={{ color: '#fff', fontWeight: '600' }}>{groupModal.user.username}</span>
-                        </div>
-                        <div className="form-group">
-                            <label className="form-label">选择分组</label>
-                            <Select className="form-input" value={groupModal.group} onChange={e => setGroupModal({ ...groupModal, group: e.target.value })}>
-                                {groupOptions.map(name => (
-                                    <option key={name} value={name}>{name}</option>
-                                ))}
-                            </Select>
-                        </div>
                     </div>
                 )}
             </Modal>
@@ -632,7 +598,7 @@ export default function Users() {
                                 id="user-balance-amount"
                                 type="number"
                                 className="form-input"
-                                placeholder=""
+                                placeholder="输入金额"
                                 min="0.01"
                                 step="0.01"
                                 value={balanceModal.amount}

@@ -10,7 +10,9 @@ public class RelayProperties {
     private String claudeBaseUrl = "https://api.anthropic.com";
     private String anthropicVersion = "2023-06-01";
     private int connectTimeoutMs = 30000;
-    private int readTimeoutMs = 120000;
+    private int readTimeoutMs = 300000;
+    /** 流式请求专用读取超时，默认 300 秒（大模型长回复可能需要更长时间） */
+    private int streamReadTimeoutMs = 300000;
     private boolean probeEnabled = false;
     private int probeReadTimeoutMs = 10000;
     private int probeIntervalMs = 10000;
@@ -64,6 +66,14 @@ public class RelayProperties {
 
     public void setReadTimeoutMs(int readTimeoutMs) {
         this.readTimeoutMs = readTimeoutMs;
+    }
+
+    public int getStreamReadTimeoutMs() {
+        return streamReadTimeoutMs;
+    }
+
+    public void setStreamReadTimeoutMs(int streamReadTimeoutMs) {
+        this.streamReadTimeoutMs = streamReadTimeoutMs;
     }
 
     public boolean isProbeEnabled() {

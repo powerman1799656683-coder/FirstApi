@@ -333,7 +333,7 @@ th[data-sortable][aria-sort="descending"]::after {
 }
 
 .page-content {
-  padding: 40px;
+  padding: 24px 32px;
   max-width: 1600px;
   margin: 0 auto;
   width: 100%;
@@ -662,6 +662,58 @@ th[data-sortable][aria-sort="descending"]::after {
   font-size: 11px;
 }
 
+.token-usage-detail-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 20px;
+  border-top: 1px solid rgba(148, 163, 184, 0.12);
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.token-usage-detail-page-size {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.token-usage-detail-page-size select {
+  background: rgba(148, 163, 184, 0.1);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 6px;
+  color: var(--text-primary);
+  padding: 4px 8px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.token-usage-detail-page-nav {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.token-usage-detail-page-nav button {
+  background: rgba(148, 163, 184, 0.1);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 6px;
+  color: var(--text-primary);
+  padding: 4px 14px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.token-usage-detail-page-nav button:hover:not(:disabled) {
+  background: rgba(148, 163, 184, 0.2);
+}
+
+.token-usage-detail-page-nav button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 .records-model-pill {
   background: rgba(59, 130, 246, 0.12);
   color: #60a5fa;
@@ -683,7 +735,7 @@ th[data-sortable][aria-sort="descending"]::after {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 20px;
+  margin-bottom: 14px;
   flex-wrap: wrap;
 }
 
@@ -1130,6 +1182,14 @@ select.select-control:disabled {
     0 0 50px rgba(14, 165, 233, 0.03);
 }
 
+.chart-card--stable {
+  will-change: auto;
+}
+
+.chart-card--stable:hover {
+  transform: none;
+}
+
 /* Stat Grid Styling */
 .stat-header {
   display: flex;
@@ -1522,7 +1582,7 @@ table {
 
 th {
   background-color: rgba(255, 255, 255, 0.01);
-  padding: 16px 24px;
+  padding: 10px 16px;
   text-align: left;
   font-size: 11px;
   font-weight: 700;
@@ -1534,15 +1594,21 @@ th {
 }
 
 td {
-  padding: 18px 24px;
+  padding: 10px 16px;
   border-bottom: 1px solid var(--border-color);
   font-size: 14px;
   color: var(--text-main);
-  transition: background 0.3s, color 0.3s;
+}
+
+.table-row-hover {
+  transition: background-color 0.2s;
+}
+
+.table-row-hover:hover {
+  background-color: rgba(59, 130, 246, 0.04);
 }
 
 .table-row-hover:hover td {
-  background: linear-gradient(90deg, rgba(59, 130, 246, 0.03), rgba(14, 165, 233, 0.03), rgba(6, 182, 212, 0.02), transparent);
   color: var(--text-primary);
 }
 
@@ -1649,7 +1715,7 @@ td {
   border-radius: var(--radius-lg);
   overflow: hidden;
   z-index: 1000;
-  box-shadow: 
+  box-shadow:
     0 10px 40px rgba(0, 0, 0, 0.5),
     0 0 0 1px rgba(255, 255, 255, 0.05);
   animation: selectMenuEnter 0.3s cubic-bezier(0.16, 1, 0.3, 1);
@@ -1658,8 +1724,26 @@ td {
   padding: 6px;
 }
 
+.custom-select-options--up {
+  top: auto;
+  bottom: calc(100% + 8px);
+  animation: selectMenuEnterUp 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Portal-rendered dropUp menu (rendered on body) */
+body > .custom-select-options--up {
+  bottom: auto; /* overridden by inline style */
+  right: auto;
+  width: auto;
+}
+
 @keyframes selectMenuEnter {
   from { opacity: 0; transform: translateY(10px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes selectMenuEnterUp {
+  from { opacity: 0; transform: translateY(-10px) scale(0.98); }
   to { opacity: 1; transform: translateY(0) scale(1); }
 }
 
@@ -1802,7 +1886,7 @@ td {
 
 .modal-content {
   width: 100%;
-  max-width: 600px;
+  max-width: min(600px, calc(100vw - 24px));
   max-height: 90vh;
   display: flex;
   flex-direction: column;
@@ -3741,6 +3825,117 @@ td {
 /* Page content fade-in */
 .aurora-page-enter {
   animation: aurora-card-enter 0.4s cubic-bezier(0.16, 1, 0.3, 1) backwards;
+}
+
+/* ============================================
+   Records Page Responsive Grid Classes
+   ============================================ */
+.records-stats-4col {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 24px;
+  margin-bottom: 32px;
+}
+
+.records-charts-2col {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr;
+  gap: 24px;
+  margin-bottom: 32px;
+}
+
+@media (max-width: 1024px) {
+  .records-stats-4col {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 768px) {
+  .records-stats-4col {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+    margin-bottom: 20px;
+  }
+  .records-charts-2col {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 480px) {
+  .records-stats-4col {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ============================================
+   Mobile Hamburger Menu & Sidebar Overlay
+   ============================================ */
+.mobile-menu-btn {
+  display: none;
+}
+
+.sidebar-overlay {
+  display: none;
+}
+
+@media (max-width: 768px) {
+  .mobile-menu-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: none;
+    border: none;
+    color: var(--text-primary);
+    cursor: pointer;
+    padding: 8px;
+    border-radius: var(--radius-sm);
+    flex-shrink: 0;
+    order: -1;
+  }
+
+  .sidebar--open {
+    transform: translateX(0) !important;
+    z-index: 200;
+    box-shadow: 4px 0 40px rgba(0, 0, 0, 0.5);
+  }
+
+  .sidebar-overlay {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.55);
+    z-index: 199;
+  }
+
+  /* Modal 手机端从底部弹出 */
+  .modal-overlay {
+    padding: 0;
+    align-items: flex-end;
+  }
+
+  .modal-content {
+    max-height: 88vh;
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .modal-header {
+    padding: 16px 20px;
+  }
+
+  .modal-body {
+    padding: 16px 20px;
+  }
+
+  .modal-footer {
+    padding: 16px 20px;
+  }
+
+  /* 搜索框宽度自适应 */
+  .controls-group {
+    flex-wrap: wrap;
+  }
 }
 
 /* ============================================

@@ -9,12 +9,16 @@ import {
     History,
     KeyRound,
     LogOut,
+    Menu,
     Server,
     Settings,
     ShieldCheck,
+    Sliders,
     Tag,
     User,
     Users,
+    Wallet,
+    X as XIcon,
     Zap,
 } from 'lucide-react';
 import { useAuth } from '../auth/AuthContext';
@@ -26,18 +30,20 @@ const adminMenu = [
     { name: 'common.nav.monitor_system', desc: '实时监控系统运行状态', icon: Activity, path: '/monitor/system' },
     { name: 'common.nav.monitor_accounts', desc: '账号调用数据监控', icon: Server, path: '/monitor/accounts' },
     { name: 'common.nav.users', desc: '管理系统用户账户', icon: Users, path: '/users' },
+     { name: 'common.nav.subscriptions', desc: '管理用户订阅方案', icon: CreditCard, path: '/subscriptions' },
+    { name: '订阅设置', desc: '管理订阅等级与配额', icon: Sliders, path: '/subscription-plans' },
     { name: 'common.nav.groups', desc: '管理 API 分组配置', icon: Box, path: '/groups' },
-    { name: 'common.nav.subscriptions', desc: '管理用户订阅方案', icon: CreditCard, path: '/subscriptions' },
     { name: 'common.nav.accounts', desc: '管理上游 API 账号', icon: ShieldCheck, path: '/accounts' },
-    { name: 'common.nav.announcements', desc: '系统公告管理', icon: Bell, path: '/announcements' },
-    { name: '调用记录', desc: 'API 调用记录查询', icon: Zap, path: '/records' },
     { name: '模型定价', desc: '模型定价配置', icon: Tag, path: '/admin/model-pricing' },
+    { name: '调用记录', desc: 'API 调用记录查询', icon: Zap, path: '/records' },
+    { name: 'common.nav.announcements', desc: '系统公告管理', icon: Bell, path: '/announcements' },
     { name: 'common.nav.system_settings', desc: '全局系统配置', icon: Settings, path: '/settings' },
 ];
 
 const selfServiceMenu = [
     { name: 'common.nav.api_keys', desc: '管理您的 API 密钥', icon: KeyRound, path: '/my-api-keys' },
     { name: 'common.nav.usage_records', desc: '查看 API 调用历史', icon: History, path: '/my-records' },
+    { name: '我的订阅', desc: '查看每日配额使用情况', icon: CreditCard, path: '/my-subscription' },
     { name: 'common.nav.my_profile', desc: '个人资料与安全设置', icon: User, path: '/profile' },
 ];
 
@@ -144,6 +150,7 @@ export default function Layout() {
     const location = useLocation();
     const navigate = useNavigate();
 
+    const [sidebarOpen, setSidebarOpen] = useState(false);
     const [announcementItems, setAnnouncementItems] = useState([]);
 
     const [announcementOpen, setAnnouncementOpen] = useState(false);
@@ -164,6 +171,11 @@ export default function Layout() {
         name: isAdmin ? 'common.nav.monitor_system' : 'common.nav.api_keys',
     };
     const hidePageHeaderTitle = location.pathname === '/my-records';
+
+    // 路由变化时自动关闭移动端侧边栏
+    useEffect(() => {
+        setSidebarOpen(false);
+    }, [location.pathname]);
 
     const initials = (user?.displayName || user?.username || 'NA').substring(0, 2).toUpperCase();
 
@@ -227,10 +239,22 @@ export default function Layout() {
 
     const handleOpenAnnouncementCenter = () => {
         const announcementReadStorageKey = buildAnnouncementReadStorageKey(userId, username);
-        markAnnouncementsAsRead(announcementReadStorageKey, announcementItems);
-        setUnreadAnnouncementCount(0);
-        setAnnouncementTab('system');
+        setAnnouncementLoading(true);
         setAnnouncementOpen(true);
+        api.get('/user/announcements')
+            .then((data) => {
+                const nextItems = normalizeAnnouncements(data).filter((item) => item && (item.title || item.content));
+                setAnnouncementItems(nextItems);
+                setAnnouncementError('');
+                markAnnouncementsAsRead(announcementReadStorageKey, nextItems);
+                setUnreadAnnouncementCount(0);
+            })
+            .catch((error) => {
+                setAnnouncementError(error?.message || '加载公告失败');
+            })
+            .finally(() => {
+                setAnnouncementLoading(false);
+            });
     };
 
     const handleCloseAnnouncementsForToday = () => {
@@ -245,7 +269,13 @@ export default function Layout() {
 
     return (
         <div className="app-container">
-            <aside className="sidebar">
+            {sidebarOpen && (
+                <div
+                    className="sidebar-overlay"
+                    onClick={() => setSidebarOpen(false)}
+                />
+            )}
+            <aside className={`sidebar${sidebarOpen ? ' sidebar--open' : ''}`}>
                 <div className="logo-container">
                     <div className="logo-icon">
                         <span className="logo-icon-char">{(publicConfig?.siteName || '赔钱中转').charAt(0)}</span>
@@ -284,6 +314,14 @@ export default function Layout() {
                     className="top-header"
                     style={{ justifyContent: hidePageHeaderTitle ? 'flex-end' : 'space-between' }}
                 >
+                    <button
+                        type="button"
+                        className="mobile-menu-btn"
+                        aria-label="打开菜单"
+                        onClick={() => setSidebarOpen((v) => !v)}
+                    >
+                        {sidebarOpen ? <XIcon size={22} /> : <Menu size={22} />}
+                    </button>
                     {!hidePageHeaderTitle && (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
                             <h1 style={{ fontSize: '18px', fontWeight: '800', color: 'var(--text-primary)' }}>{t(currentPage.name)}</h1>
@@ -332,6 +370,13 @@ export default function Layout() {
                         </button>
 
                         <LanguageSwitcher />
+
+                        {user?.balance != null && (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--text-dim)', fontSize: '13px', fontWeight: '600' }}>
+                                <Wallet size={16} />
+                                <span style={{ color: 'var(--text-primary)' }}>{user.balance}</span>
+                            </div>
+                        )}
 
                         <button
                             type="button"

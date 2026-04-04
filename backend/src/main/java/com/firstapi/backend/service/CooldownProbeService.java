@@ -63,6 +63,8 @@ public class CooldownProbeService {
     private final RelayProperties relayProperties;
     private final IpRepository ipRepository;
     private final ObjectMapper objectMapper;
+    private final OpenAiRelayAdapter openAiRelayAdapter;
+    private final ClaudeRelayAdapter claudeRelayAdapter;
 
     public CooldownProbeService(RelayAccountSelector relayAccountSelector,
                                 AccountRepository accountRepository,
@@ -71,7 +73,9 @@ public class CooldownProbeService {
                                 UpstreamHttpClient upstreamHttpClient,
                                 RelayProperties relayProperties,
                                 IpRepository ipRepository,
-                                ObjectMapper objectMapper) {
+                                ObjectMapper objectMapper,
+                                OpenAiRelayAdapter openAiRelayAdapter,
+                                ClaudeRelayAdapter claudeRelayAdapter) {
         this.relayAccountSelector = relayAccountSelector;
         this.accountRepository = accountRepository;
         this.quotaStateManager = quotaStateManager;
@@ -80,6 +84,8 @@ public class CooldownProbeService {
         this.relayProperties = relayProperties;
         this.ipRepository = ipRepository;
         this.objectMapper = objectMapper;
+        this.openAiRelayAdapter = openAiRelayAdapter;
+        this.claudeRelayAdapter = claudeRelayAdapter;
     }
 
     @Scheduled(fixedDelayString = "${app.relay.probe-interval-ms:10000}", initialDelay = 30000)
@@ -122,7 +128,7 @@ public class CooldownProbeService {
 
                 String provider = resolveProvider(entry, account);
                 RelayResult probeResult = sendProbe(account, provider);
-                handleMemoryProbeResult(accountId, probeResult, provider);
+                handleMemoryProbeResult(accountId, account, probeResult, provider);
             } catch (Exception e) {
                 LOGGER.debug("Memory probe failed for account {}: {}", accountId, e.getMessage());
             } finally {
@@ -131,7 +137,7 @@ public class CooldownProbeService {
         }
     }
 
-    private void handleMemoryProbeResult(Long accountId, RelayResult result, String provider) {
+    private void handleMemoryProbeResult(Long accountId, AccountItem account, RelayResult result, String provider) {
         if (result.isSuccess()) {
             relayAccountSelector.removeCooldown(accountId);
             LOGGER.info("Account {} memory probe succeeded, cooldown cleared", accountId);
@@ -142,11 +148,16 @@ public class CooldownProbeService {
         String errorType = extractErrorType(result.getBody());
 
         if (status == 429 && isQuotaError(errorType, result)) {
-            // Quota exhaustion discovered — escalate to persistent cooldown
-            relayAccountSelector.removeCooldown(accountId);
-            markQuotaExhausted(accountId, provider + "_insufficient_quota");
-            LOGGER.warn("Account {} probe revealed quota exhaustion, moved to persistent cooldown", accountId);
-            return;
+            // OAuth/subscription accounts don't have credit balance — skip persistent cooldown
+            if ("OAuth".equalsIgnoreCase(account.getAuthMethod())) {
+                LOGGER.warn("Account {} OAuth probe 429 with quota-like message, keeping as memory cooldown", accountId);
+            } else {
+                // Quota exhaustion discovered — escalate to persistent cooldown
+                relayAccountSelector.removeCooldown(accountId);
+                markQuotaExhausted(accountId, provider + "_insufficient_quota");
+                LOGGER.warn("Account {} probe revealed quota exhaustion, moved to persistent cooldown", accountId);
+                return;
+            }
         }
 
         if (status == 429) {
@@ -158,7 +169,9 @@ public class CooldownProbeService {
         }
 
         if (status == 401 || status == 403) {
-            LOGGER.warn("Account {} probe returned {}, needs admin review", accountId, status);
+            // Keep cooldown active — credential is invalid, needs admin re-authentication
+            relayAccountSelector.cooldownAccount(accountId, 600, "auth_error_" + status, provider);
+            LOGGER.warn("Account {} probe returned {}, re-cooldown 600s, needs admin review", accountId, status);
             return;
         }
 
@@ -225,7 +238,8 @@ public class CooldownProbeService {
         }
 
         if (status == 401 || status == 403) {
-            LOGGER.warn("Account {} persistent probe returned {}, needs admin review", accountId, status);
+            // Don't clear quota state — credential is still invalid
+            LOGGER.warn("Account {} persistent probe returned {}, keeping quota-exhausted, needs admin review", accountId, status);
             return;
         }
 
@@ -236,41 +250,28 @@ public class CooldownProbeService {
     // ── Probe request construction ─────────────────────────────────────
 
     private RelayResult sendProbe(AccountItem account, String provider) {
-        String credential = sensitiveDataService.reveal(account.getCredential());
-        String baseUrl = relayAccountSelector.resolveBaseUrl(account, provider);
         IpItem proxy = resolveProxySafe(account);
-        int readTimeout = relayProperties.getProbeReadTimeoutMs();
-
-        Map<String, String> headers = new LinkedHashMap<>();
-        JsonNode payload;
-
+        // 复用 Adapter 的 probeAccount()，确保与正常中转路径完全一致
+        // （含 OAuth 账号的正确端点、模型、请求头）
         if ("claude".equals(provider)) {
-            headers.put("x-api-key", credential);
-            headers.put("anthropic-version", relayProperties.getAnthropicVersion());
-            payload = buildClaudeProbePayload();
-            return upstreamHttpClient.postJson(baseUrl + "/v1/messages", headers, payload, proxy, readTimeout);
+            return claudeRelayAdapter.probeAccount(account, proxy);
+        } else if ("openai".equals(provider)) {
+            return openAiRelayAdapter.probeAccount(account, proxy);
         } else {
-            // OpenAI and other providers
+            // 其他平台：通用 chat/completions
+            String credential = sensitiveDataService.reveal(account.getCredential());
+            String baseUrl = relayAccountSelector.resolveBaseUrl(account, provider);
+            int readTimeout = relayProperties.getProbeReadTimeoutMs();
+            Map<String, String> headers = new LinkedHashMap<>();
             headers.put(HttpHeaders.AUTHORIZATION, "Bearer " + credential);
-            payload = buildOpenAiProbePayload();
-            return upstreamHttpClient.postJson(baseUrl + "/v1/chat/completions", headers, payload, proxy, readTimeout);
+            return upstreamHttpClient.postJson(baseUrl + "/v1/chat/completions", headers,
+                    buildOpenAiProbePayload(), proxy, readTimeout);
         }
     }
 
     private JsonNode buildOpenAiProbePayload() {
         ObjectNode root = objectMapper.createObjectNode();
         root.put("model", relayProperties.getProbeOpenaiModel());
-        root.put("max_tokens", 1);
-        ArrayNode messages = root.putArray("messages");
-        ObjectNode msg = messages.addObject();
-        msg.put("role", "user");
-        msg.put("content", "hi");
-        return root;
-    }
-
-    private JsonNode buildClaudeProbePayload() {
-        ObjectNode root = objectMapper.createObjectNode();
-        root.put("model", relayProperties.getProbeClaudeModel());
         root.put("max_tokens", 1);
         ArrayNode messages = root.putArray("messages");
         ObjectNode msg = messages.addObject();

@@ -256,6 +256,84 @@ public class RelayRecordRepository extends JdbcListRepository<RelayRecordItem> {
                 "SELECT DISTINCT model_name FROM relay_records WHERE model_name IS NOT NULL ORDER BY model_name", String.class);
     }
 
+    // -------- 今日/昨日对比查询 --------
+
+    public BigDecimal sumCostToday() {
+        BigDecimal r = jdbcTemplate.queryForObject(
+                "SELECT COALESCE(SUM(cost), 0) FROM relay_records WHERE DATE(created_at_ts) = CURDATE()", BigDecimal.class);
+        return r != null ? r : BigDecimal.ZERO;
+    }
+
+    public BigDecimal sumCostYesterday() {
+        BigDecimal r = jdbcTemplate.queryForObject(
+                "SELECT COALESCE(SUM(cost), 0) FROM relay_records WHERE DATE(created_at_ts) = DATE_SUB(CURDATE(), INTERVAL 1 DAY)", BigDecimal.class);
+        return r != null ? r : BigDecimal.ZERO;
+    }
+
+    public long sumTotalTokensToday() {
+        Long r = jdbcTemplate.queryForObject(
+                "SELECT COALESCE(SUM(total_tokens), 0) FROM relay_records WHERE DATE(created_at_ts) = CURDATE()", Long.class);
+        return r != null ? r : 0L;
+    }
+
+    public long sumTotalTokensYesterday() {
+        Long r = jdbcTemplate.queryForObject(
+                "SELECT COALESCE(SUM(total_tokens), 0) FROM relay_records WHERE DATE(created_at_ts) = DATE_SUB(CURDATE(), INTERVAL 1 DAY)", Long.class);
+        return r != null ? r : 0L;
+    }
+
+    public long countDistinctApiKeysToday() {
+        Long r = jdbcTemplate.queryForObject(
+                "SELECT COUNT(DISTINCT api_key_id) FROM relay_records WHERE DATE(created_at_ts) = CURDATE()", Long.class);
+        return r != null ? r : 0L;
+    }
+
+    public long countDistinctApiKeysYesterday() {
+        Long r = jdbcTemplate.queryForObject(
+                "SELECT COUNT(DISTINCT api_key_id) FROM relay_records WHERE DATE(created_at_ts) = DATE_SUB(CURDATE(), INTERVAL 1 DAY)", Long.class);
+        return r != null ? r : 0L;
+    }
+
+    public double avgLatencyMsToday() {
+        Double r = jdbcTemplate.queryForObject(
+                "SELECT COALESCE(AVG(latency_ms), 0) FROM relay_records WHERE DATE(created_at_ts) = CURDATE()", Double.class);
+        return r != null ? r : 0.0;
+    }
+
+    public double avgLatencyMsYesterday() {
+        Double r = jdbcTemplate.queryForObject(
+                "SELECT COALESCE(AVG(latency_ms), 0) FROM relay_records WHERE DATE(created_at_ts) = DATE_SUB(CURDATE(), INTERVAL 1 DAY)", Double.class);
+        return r != null ? r : 0.0;
+    }
+
     public record ModelStat(String modelName, long callCount, long totalTokens, BigDecimal totalCost) {}
     public record DayStat(String date, long callCount, long totalTokens, BigDecimal totalCost) {}
+    public record ApiKeyStat(long apiKeyId, long requestCount, BigDecimal totalCost) {}
+
+    public List<ApiKeyStat> groupByApiKeyIdForOwner(Long ownerId) {
+        return groupByApiKeyIdForOwner(ownerId, null, null);
+    }
+
+    public List<ApiKeyStat> groupByApiKeyIdForOwner(Long ownerId, java.time.LocalDateTime start, java.time.LocalDateTime end) {
+        StringBuilder sql = new StringBuilder(
+                "SELECT api_key_id, COUNT(*) AS request_count, COALESCE(SUM(cost), 0) AS total_cost " +
+                "FROM relay_records WHERE owner_id = ?");
+        java.util.List<Object> params = new java.util.ArrayList<>();
+        params.add(ownerId);
+        if (start != null) {
+            sql.append(" AND created_at_ts >= ?");
+            params.add(start);
+        }
+        if (end != null) {
+            sql.append(" AND created_at_ts <= ?");
+            params.add(end);
+        }
+        sql.append(" GROUP BY api_key_id");
+        return jdbcTemplate.query(sql.toString(),
+                (rs, rowNum) -> new ApiKeyStat(
+                        rs.getLong("api_key_id"),
+                        rs.getLong("request_count"),
+                        rs.getBigDecimal("total_cost")
+                ), params.toArray());
+    }
 }

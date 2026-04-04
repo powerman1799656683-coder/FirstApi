@@ -1,5 +1,6 @@
 package com.firstapi.backend.model;
 
+import com.fasterxml.jackson.annotation.JsonAnyGetter;
 import com.fasterxml.jackson.annotation.JsonAnySetter;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonInclude;
@@ -28,6 +29,11 @@ public class RelayChatCompletionRequest {
     private Double frequencyPenalty;
     private Object stop;
     private String user;
+    private List<Object> tools;
+    @JsonProperty("tool_choice")
+    private Object toolChoice;
+    @JsonProperty("parallel_tool_calls")
+    private Boolean parallelToolCalls;
     @JsonIgnore
     private final Map<String, Object> unsupportedFields = new LinkedHashMap<String, Object>();
 
@@ -123,6 +129,30 @@ public class RelayChatCompletionRequest {
         this.user = user;
     }
 
+    public List<Object> getTools() {
+        return tools;
+    }
+
+    public void setTools(List<Object> tools) {
+        this.tools = tools;
+    }
+
+    public Object getToolChoice() {
+        return toolChoice;
+    }
+
+    public void setToolChoice(Object toolChoice) {
+        this.toolChoice = toolChoice;
+    }
+
+    public Boolean getParallelToolCalls() {
+        return parallelToolCalls;
+    }
+
+    public void setParallelToolCalls(Boolean parallelToolCalls) {
+        this.parallelToolCalls = parallelToolCalls;
+    }
+
     @JsonIgnore
     public Map<String, Object> getUnsupportedFields() {
         return unsupportedFields;
@@ -131,6 +161,22 @@ public class RelayChatCompletionRequest {
     @JsonIgnore
     public boolean hasUnsupportedFields() {
         return !unsupportedFields.isEmpty();
+    }
+
+    @JsonIgnore
+    public boolean hasOpenAiToolCallingFields() {
+        if ((tools != null && !tools.isEmpty()) || toolChoice != null || parallelToolCalls != null) {
+            return true;
+        }
+        if (messages == null || messages.isEmpty()) {
+            return false;
+        }
+        for (Message message : messages) {
+            if (message != null && message.hasToolCallingFields()) {
+                return true;
+            }
+        }
+        return false;
     }
 
     @JsonIgnore
@@ -151,12 +197,18 @@ public class RelayChatCompletionRequest {
 
     public static class Message {
         private String role;
-        private String content;
+        private Object content;
+        @JsonProperty("tool_calls")
+        private List<Object> toolCalls;
+        @JsonProperty("tool_call_id")
+        private String toolCallId;
+        @JsonIgnore
+        private final Map<String, Object> extraFields = new LinkedHashMap<String, Object>();
 
         public Message() {
         }
 
-        public Message(String role, String content) {
+        public Message(String role, Object content) {
             this.role = role;
             this.content = content;
         }
@@ -169,12 +221,76 @@ public class RelayChatCompletionRequest {
             this.role = role;
         }
 
-        public String getContent() {
+        public Object getRawContent() {
             return content;
         }
 
-        public void setContent(String content) {
+        @SuppressWarnings("unchecked")
+        public String getContent() {
+            if (content == null) {
+                return null;
+            }
+            if (content instanceof String) {
+                return (String) content;
+            }
+            if (content instanceof List) {
+                StringBuilder sb = new StringBuilder();
+                for (Object part : (List<Object>) content) {
+                    if (part instanceof Map) {
+                        Map<String, Object> map = (Map<String, Object>) part;
+                        Object text = map.get("text");
+                        if (text != null) {
+                            if (sb.length() > 0) {
+                                sb.append('\n');
+                            }
+                            sb.append(text.toString());
+                        }
+                    } else if (part instanceof String) {
+                        if (sb.length() > 0) {
+                            sb.append('\n');
+                        }
+                        sb.append(part);
+                    }
+                }
+                return sb.toString();
+            }
+            return content.toString();
+        }
+
+        public void setContent(Object content) {
             this.content = content;
+        }
+
+        public List<Object> getToolCalls() {
+            return toolCalls;
+        }
+
+        public void setToolCalls(List<Object> toolCalls) {
+            this.toolCalls = toolCalls;
+        }
+
+        public String getToolCallId() {
+            return toolCallId;
+        }
+
+        public void setToolCallId(String toolCallId) {
+            this.toolCallId = toolCallId;
+        }
+
+        @JsonAnyGetter
+        public Map<String, Object> getExtraFields() {
+            return extraFields;
+        }
+
+        @JsonAnySetter
+        public void addExtraField(String name, Object value) {
+            extraFields.put(name, value);
+        }
+
+        @JsonIgnore
+        public boolean hasToolCallingFields() {
+            return (toolCalls != null && !toolCalls.isEmpty())
+                    || (toolCallId != null && !toolCallId.trim().isEmpty());
         }
     }
 

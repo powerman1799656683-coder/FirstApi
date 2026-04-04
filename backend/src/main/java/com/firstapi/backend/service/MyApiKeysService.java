@@ -7,6 +7,7 @@ import com.firstapi.backend.model.AuthenticatedUser;
 import com.firstapi.backend.model.GroupItem;
 import com.firstapi.backend.repository.GroupRepository;
 import com.firstapi.backend.repository.MyApiKeysRepository;
+import com.firstapi.backend.repository.RelayRecordRepository;
 import com.firstapi.backend.util.TimeSupport;
 import com.firstapi.backend.util.ValidationSupport;
 import org.springframework.http.HttpStatus;
@@ -26,20 +27,23 @@ public class MyApiKeysService {
     private final MyApiKeysRepository repository;
     private final GroupRepository groupRepository;
     private final SensitiveDataService sensitiveDataService;
+    private final RelayRecordRepository relayRecordRepository;
 
-    public MyApiKeysService(MyApiKeysRepository repository, GroupRepository groupRepository, SensitiveDataService sensitiveDataService) {
+    public MyApiKeysService(MyApiKeysRepository repository, GroupRepository groupRepository, SensitiveDataService sensitiveDataService, RelayRecordRepository relayRecordRepository) {
         this.repository = repository;
         this.groupRepository = groupRepository;
         this.sensitiveDataService = sensitiveDataService;
+        this.relayRecordRepository = relayRecordRepository;
     }
 
     public PageResponse<ApiKeyItem> listByUserId(Long userId) {
         List<ApiKeyItem> items = repository.findAllByOwnerId(userId);
         Map<Long, String> groupNameMap = loadGroupNameMap();
-        return new PageResponse<>(items.stream().map(item -> toResponse(item, false, groupNameMap)).collect(Collectors.toList()));
+        Map<Long, RelayRecordRepository.ApiKeyStat> statsMap = loadApiKeyStats(userId);
+        return new PageResponse<>(items.stream().map(item -> toResponse(item, true, groupNameMap, statsMap)).collect(Collectors.toList()));
     }
 
-    public PageResponse<ApiKeyItem> list(String keyword) {
+    public PageResponse<ApiKeyItem> list(String keyword, java.time.LocalDateTime start, java.time.LocalDateTime end) {
         AuthenticatedUser user = CurrentSessionHolder.require();
         List<ApiKeyItem> items = repository.findAllByOwnerId(user.getId());
         if (!isBlank(keyword)) {
@@ -48,15 +52,16 @@ public class MyApiKeysService {
                     .collect(Collectors.toList());
         }
         Map<Long, String> groupNameMap = loadGroupNameMap();
-        return new PageResponse<>(items.stream().map(item -> toResponse(item, false, groupNameMap)).collect(Collectors.toList()));
+        Map<Long, RelayRecordRepository.ApiKeyStat> statsMap = loadApiKeyStats(user.getId(), start, end);
+        return new PageResponse<>(items.stream().map(item -> toResponse(item, false, groupNameMap, statsMap)).collect(Collectors.toList()));
     }
 
     public ApiKeyItem get(Long id) {
-        return toResponse(requireOwned(id), false, loadGroupNameMap());
+        return toResponse(requireOwned(id), false, loadGroupNameMap(), null);
     }
 
     public ApiKeyItem revealKey(Long id) {
-        return toResponse(requireOwned(id), true, loadGroupNameMap());
+        return toResponse(requireOwned(id), true, loadGroupNameMap(), null);
     }
 
     private static final int MAX_KEYS_PER_USER = 10;
@@ -83,7 +88,7 @@ public class MyApiKeysService {
         item.setStatus(emptyAsDefault(request.getStatus(), "正常"));
         item.setLastUsed("-");
         repository.save(item);
-        return toResponse(item, true, loadGroupNameMap());
+        return toResponse(item, true, loadGroupNameMap(), null);
     }
 
     public ApiKeyItem update(Long id, ApiKeyItem.Request request) {
@@ -102,7 +107,7 @@ public class MyApiKeysService {
             current.setGroupId(request.getGroupId());
         }
         repository.update(current);
-        return toResponse(current, false, loadGroupNameMap());
+        return toResponse(current, false, loadGroupNameMap(), null);
     }
 
     public void delete(Long id) {
@@ -116,7 +121,7 @@ public class MyApiKeysService {
         item.setKey(sensitiveDataService.protect(generateKey()));
         item.setLastUsed("-");
         repository.update(item);
-        return toResponse(item, true, loadGroupNameMap());
+        return toResponse(item, true, loadGroupNameMap(), null);
     }
 
     private ApiKeyItem requireOwned(Long id) {
@@ -138,7 +143,19 @@ public class MyApiKeysService {
         return map;
     }
 
-    private ApiKeyItem toResponse(ApiKeyItem source, boolean revealFullKey, Map<Long, String> groupNameMap) {
+    private Map<Long, RelayRecordRepository.ApiKeyStat> loadApiKeyStats(Long ownerId) {
+        return loadApiKeyStats(ownerId, null, null);
+    }
+
+    private Map<Long, RelayRecordRepository.ApiKeyStat> loadApiKeyStats(Long ownerId, java.time.LocalDateTime start, java.time.LocalDateTime end) {
+        Map<Long, RelayRecordRepository.ApiKeyStat> map = new HashMap<>();
+        for (RelayRecordRepository.ApiKeyStat stat : relayRecordRepository.groupByApiKeyIdForOwner(ownerId, start, end)) {
+            map.put(stat.apiKeyId(), stat);
+        }
+        return map;
+    }
+
+    private ApiKeyItem toResponse(ApiKeyItem source, boolean revealFullKey, Map<Long, String> groupNameMap, Map<Long, RelayRecordRepository.ApiKeyStat> statsMap) {
         String plainTextKey;
         try {
             plainTextKey = sensitiveDataService.reveal(source.getKey());
@@ -159,6 +176,13 @@ public class MyApiKeysService {
         response.setKeyPreview(maskKey(plainTextKey));
         if (revealFullKey && plainTextKey != null) {
             response.setPlainTextKey(plainTextKey);
+        }
+        if (statsMap != null && source.getId() != null) {
+            RelayRecordRepository.ApiKeyStat stat = statsMap.get(source.getId());
+            if (stat != null) {
+                response.setRequestCount(stat.requestCount());
+                response.setTotalCost(stat.totalCost());
+            }
         }
         return response;
     }

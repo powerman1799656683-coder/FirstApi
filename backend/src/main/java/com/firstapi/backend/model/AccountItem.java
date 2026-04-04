@@ -48,6 +48,9 @@ public class AccountItem implements SimpleStore.Identifiable {
     private String tlsFingerprintMode = "NONE";
     private boolean sessionIdMasqueradeEnabled;
     private int sessionIdMasqueradeTtlMinutes = 15;
+    @JsonProperty(access = JsonProperty.Access.WRITE_ONLY)
+    private String encryptedRefreshToken;
+    private String oauthTokenExpiresAt;
     private String credentialMask;
     private String effectiveStatus;
     private Boolean scheduleEnabled;
@@ -199,6 +202,10 @@ public class AccountItem implements SimpleStore.Identifiable {
     public void setSessionIdMasqueradeEnabled(boolean sessionIdMasqueradeEnabled) { this.sessionIdMasqueradeEnabled = sessionIdMasqueradeEnabled; }
     public int getSessionIdMasqueradeTtlMinutes() { return sessionIdMasqueradeTtlMinutes; }
     public void setSessionIdMasqueradeTtlMinutes(int sessionIdMasqueradeTtlMinutes) { this.sessionIdMasqueradeTtlMinutes = sessionIdMasqueradeTtlMinutes; }
+    public String getEncryptedRefreshToken() { return encryptedRefreshToken; }
+    public void setEncryptedRefreshToken(String encryptedRefreshToken) { this.encryptedRefreshToken = encryptedRefreshToken; }
+    public String getOauthTokenExpiresAt() { return oauthTokenExpiresAt; }
+    public void setOauthTokenExpiresAt(String oauthTokenExpiresAt) { this.oauthTokenExpiresAt = oauthTokenExpiresAt; }
     public String getCredentialMask() { return credentialMask; }
     public void setCredentialMask(String credentialMask) { this.credentialMask = credentialMask; }
     public String getEffectiveStatus() { return effectiveStatus; }

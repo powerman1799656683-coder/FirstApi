@@ -167,11 +167,29 @@ public class RelayAccountSelector {
             throw new RelayException(HttpStatus.SERVICE_UNAVAILABLE,
                     "Configured proxy not found", "proxy_not_found");
         }
-        if (!isProxyHealthy(proxy.getStatus())) {
-            throw new RelayException(HttpStatus.SERVICE_UNAVAILABLE,
-                    "Configured proxy unavailable", "proxy_unavailable");
+        if (isProxyHealthy(proxy.getStatus())) {
+            return proxy;
         }
-        return proxy;
+        // 代理不健康，按 location 回退到同地区其他可用代理
+        String location = proxy.getLocation();
+        if (location != null && !location.trim().isEmpty()) {
+            String normalizedLocation = location.trim().toLowerCase(Locale.ROOT);
+            List<IpItem> allProxies = ipRepository.findAll();
+            for (IpItem candidate : allProxies) {
+                if (candidate.getId().equals(proxy.getId())) {
+                    continue;
+                }
+                String candidateLocation = candidate.getLocation();
+                if (candidateLocation != null
+                        && candidateLocation.trim().toLowerCase(Locale.ROOT).equals(normalizedLocation)
+                        && isProxyHealthy(candidate.getStatus())) {
+                    return candidate;
+                }
+            }
+        }
+        throw new RelayException(HttpStatus.SERVICE_UNAVAILABLE,
+                "Proxy unavailable, no fallback in same location: " + (location != null ? location : "unknown"),
+                "proxy_unavailable");
     }
 
     /**

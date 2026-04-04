@@ -30,7 +30,8 @@ public class AccountRepository extends JdbcListRepository<AccountItem> {
                         "window5h_cost_control_enabled", "window5h_cost_limit_usd",
                         "session_count_control_enabled", "session_count_limit",
                         "tls_fingerprint_mode",
-                        "session_id_masquerade_enabled", "session_id_masquerade_ttl_minutes"
+                        "session_id_masquerade_enabled", "session_id_masquerade_ttl_minutes",
+                        "encrypted_refresh_token", "oauth_token_expires_at"
                 },
                 (rs, rowNum) -> {
                     AccountItem item = new AccountItem(
@@ -72,6 +73,8 @@ public class AccountRepository extends JdbcListRepository<AccountItem> {
                     item.setQuotaFailCount(rs.getInt("quota_fail_count"));
                     item.setQuotaLastReason(rs.getString("quota_last_reason"));
                     item.setQuotaUpdatedAt(rs.getString("quota_updated_at"));
+                    item.setEncryptedRefreshToken(rs.getString("encrypted_refresh_token"));
+                    item.setOauthTokenExpiresAt(rs.getString("oauth_token_expires_at"));
                     return item;
                 }
         );
@@ -86,10 +89,28 @@ public class AccountRepository extends JdbcListRepository<AccountItem> {
                 "`models`, `tiers`, `balance`, `weight`, `intercept_warmup_request`, " +
                 "`window5h_cost_control_enabled`, `window5h_cost_limit_usd`, " +
                 "`session_count_control_enabled`, `session_count_limit`, " +
-                "`tls_fingerprint_mode`, `session_id_masquerade_enabled`, `session_id_masquerade_ttl_minutes` " +
+                "`tls_fingerprint_mode`, `session_id_masquerade_enabled`, `session_id_masquerade_ttl_minutes`, " +
+                "`encrypted_refresh_token`, `oauth_token_expires_at` " +
                 "from `accounts` where `quota_exhausted` = ?",
                 getRowMapper(),
                 exhausted ? 1 : 0
+        );
+    }
+
+    public List<AccountItem> findByTempDisabled(boolean disabled) {
+        return getJdbcTemplate().query(
+                "select `id`, `name`, `platform`, `type_name`, `usage_text`, `status_name`, " +
+                "`error_count`, `last_check`, `base_url`, `credential`, `notes`, `account_type`, `auth_method`, " +
+                "`temp_disabled`, `quota_exhausted`, `quota_next_retry_at`, `quota_fail_count`, `quota_last_reason`, `quota_updated_at`, " +
+                "`priority_value`, `expiry_time`, `auto_suspend_expiry`, `proxy_id`, `concurrency`, `billing_rate`, " +
+                "`models`, `tiers`, `balance`, `weight`, `intercept_warmup_request`, " +
+                "`window5h_cost_control_enabled`, `window5h_cost_limit_usd`, " +
+                "`session_count_control_enabled`, `session_count_limit`, " +
+                "`tls_fingerprint_mode`, `session_id_masquerade_enabled`, `session_id_masquerade_ttl_minutes`, " +
+                "`encrypted_refresh_token`, `oauth_token_expires_at` " +
+                "from `accounts` where `temp_disabled` = ?",
+                getRowMapper(),
+                disabled ? 1 : 0
         );
     }
 
@@ -136,7 +157,9 @@ public class AccountRepository extends JdbcListRepository<AccountItem> {
                 item.getSessionCountLimit(),
                 item.getTlsFingerprintMode(),
                 item.isSessionIdMasqueradeEnabled() ? 1 : 0,
-                item.getSessionIdMasqueradeTtlMinutes()
+                item.getSessionIdMasqueradeTtlMinutes(),
+                item.getEncryptedRefreshToken(),
+                item.getOauthTokenExpiresAt()
         };
     }
 }

@@ -1,0 +1,258 @@
+
+================================================================================
+             FirstApi 项目 - 订阅与计费系统完整分析报告
+================================================================================
+
+分析时间: 2026-04-01
+项目路径: D:/AiProject/FirstApi
+分析级别: Very Thorough
+
+================================================================================
+1. 核心文件清单
+================================================================================
+
+【订阅相关核心】
+- SubscriptionItem.java (model)
+- SubscriptionService.java (service) - 扣减订阅额度
+- SubscriptionRepository.java (repository)
+
+【计费相关 - 最重要】
+- RelayRecordService.java ★★★ 核心扣费处理入口
+- CostCalculationService.java - 成本计算与定价匹配
+- UserService.java - 用户余额扣减
+- DailyQuotaService.java - 每日配额检查
+
+【用量记录】
+- RelayRecordRepository.java - 用量记录落库
+- DailyQuotaUsageRepository.java - 每日统计数据
+
+【Claude API 中转】
+- ClaudeRelayAdapter.java - Claude 请求适配
+- RelayService.java - 转发路由总控
+- OpenAiRelayAdapter.java - OpenAI 适配
+
+【数据库】
+- schema.sql - 表结构定义
+
+================================================================================
+2. 扣费优先级逻辑 (RelayRecordService.java)
+================================================================================
+
+关键位置: RelayRecordService.java 第 115-126 行
+
+扣费流程:
+  API成功且有成本(cost > 0)
+    ↓
+  判断: 有活跃订阅 && 额度未耗尽?
+    ├─ YES → 扣订阅额度 (subscriptionService.deductQuota)
+    └─ NO  → 扣用户余额 (userService.deductByAuthUserId)
+    ↓
+  记录每日用量 (dailyQuotaService.addCost)
+    ↓
+  落记录 (relay_records 表)
+
+代码:
+if (item.getCost() != null && item.getCost().compareTo(BigDecimal.ZERO) > 0) {
+    Long groupId = group != null ? group.getId() : null;
+    
+    if (subscriptionService.hasQuotaRemaining(apiKey.getOwnerId(), groupId)) {
+        subscriptionService.deductQuota(apiKey.getOwnerId(), groupId, item.getCost());
+    } else {
+        userService.deductByAuthUserId(apiKey.getOwnerId(), item.getCost());
+    }
+    dailyQuotaService.addCost(apiKey.getOwnerId(), item.getCost());
+}
+
+================================================================================
+3. 订阅额度扣减 (SubscriptionService.deductQuota)
+================================================================================
+
+文件: SubscriptionService.java 第 147-169 行
+方法: public synchronized void deductQuota(Long uid, Long groupId, BigDecimal cost)
+
+流程:
+  1. 查询活跃订阅: findActiveByUidAndGroup(uid, groupId)
+  2. 解析 usage_text: "¥X.XXXXXXXXXX / ¥Y.XXXXXXXXXX"
+  3. 更新: used = used + cost
+  4. 更新进度: progress = used / total * 100
+  5. 存储回数据库
+
+精度: 10位小数 (BALANCE_SCALE = 10)
+
+================================================================================
+4. 用户余额扣减 (UserService.deductByAuthUserId)
+================================================================================
+
+文件: UserService.java 第 176-187 行
+方法: public synchronized void deductByAuthUserId(Long authUserId, BigDecimal cost)
+
+流程:
+  1. 查询用户: resolveUserByAuthId(authUserId)
+  2. 解析余额: parseBalance(user.getBalance())
+  3. 扣减: updated = current - cost
+  4. 存储: formatBalance(updated)
+
+⚠️ 【问题】无下限检查，余额可能变成负数！
+
+================================================================================
+5. 成本计算 (CostCalculationService.calculate)
+================================================================================
+
+文件: CostCalculationService.java 第 46-64 行
+
+公式:
+  成本(¥) = (inputTokens × inputPrice + outputTokens × outputPrice) ÷ 1,000,000 × groupRatio
+
+精度: BigDecimal, 10位小数
+
+示例:
+  input=100, output=50, inputPrice=3.0, outputPrice=6.0, groupRatio=1.5
+  = (100×3 + 50×6) ÷ 1M × 1.5
+  = 600 ÷ 1M × 1.5
+  = 0.0009 ¥
+
+================================================================================
+6. 定价规则匹配 (CostCalculationService.matchPricing)
+================================================================================
+
+文件: CostCalculationService.java 第 90-132 行
+
+优先级:
+  1. 精确匹配: "gpt-4" == "gpt-4"
+  2. 前缀匹配: "gpt-" 匹配 "gpt-4", "gpt-4-turbo" (取最长)
+  3. 平台默认: provider="OpenAI" && type="default"
+  4. 都不匹配: cost = null
+
+================================================================================
+7. Codex 订阅配置
+================================================================================
+
+模型识别: CostCalculationService.inferProvider() 第 71-83 行
+
+if (lower.startsWith("codex") || lower.startsWith("gpt-") ...) {
+    return "OpenAI";
+}
+
+支持的模型:
+  - codex-mini
+  - gpt-5.3-codex
+
+配置流程:
+  1. 在 model_pricing 表添加行
+  2. 设置 input_price, output_price (¥/M)
+  3. 设置 match_type ("exact" 或 "prefix")
+  4. 系统自动匹配计费
+
+================================================================================
+8. Claude API 中转
+================================================================================
+
+支持的模型:
+  - claude-opus-4-6
+  - claude-sonnet-4-6
+  - claude-sonnet-3-5
+  - claude-opus-3
+
+中转入口:
+  - ClaudeRelayAdapter.relay(request, route, accountType)
+    ├─ 转换: OpenAI → Claude 请求格式
+    ├─ 转发: 到 Anthropic /v1/messages
+    ├─ 转换: Claude → OpenAI 响应格式
+    └─ 返回
+
+流式 Messages API:
+  - RelayService.relayClaudeMessagesStreaming(...)
+    └─ ClaudeRelayAdapter.relayMessagesStreaming(...)
+
+================================================================================
+9. 数据表字段速查
+================================================================================
+
+【subscriptions 表】
+  usage_text: "¥0.5000000000 / ¥100.0000000000"
+  progress_value: 0-100 (%)
+  daily_limit: 每日限额 (可选)
+  status_name: "正常" (有效状态)
+
+【relay_records 表】
+  cost: 消耗金额 (BigDecimal, 10位小数)
+  prompt_tokens, completion_tokens
+  input_price, output_price (定价快照)
+  pricing_status: "MATCHED" / "NOT_FOUND" / "USAGE_MISSING"
+  created_at_ts: 时间戳 (用于统计)
+
+【daily_quota_usage 表】
+  used_cost: 当日消耗 (¥)
+  quota_date: 日期 (Asia/Shanghai)
+  group_id: 0=用户汇总, >0=分组
+
+【users 表】
+  balance: "¥X.XXXXXXXXXX" (10位小数)
+
+================================================================================
+10. 已知问题
+================================================================================
+
+【问题 1 - 🔴 严重】余额可能被扣成负数
+  文件: UserService.java#deductByAuthUserId() 184行
+  原因: 无下限检查
+  风险: 余额可能为负值
+
+【问题 2 - 🔴 严重】扣费异常被静默吞掉
+  文件: RelayRecordService.java#record() 115-126行
+  原因: 无 try-catch，异常直接传播但上层不处理
+  风险: "有记录无扣费" 账实不符
+
+【问题 3 - 🟠 中等】分组计费类型未实现
+  文件: GroupItem.billingType, billingAmount 有定义但无使用
+  风险: 包年/企业折扣无法使用
+
+【问题 4 - 🟠 中等】定价缓存无热更新
+  文件: CostCalculationService#refreshCache() 仅启动时调用
+  风险: 修改定价需重启服务
+
+【问题 5 - 🟡 轻微】每日配额检查位置靠后
+  超额请求仍会转发到上游 API
+
+================================================================================
+11. 文件分布统计
+================================================================================
+
+Service 层 (8个关键):
+  ✓ SubscriptionService.java
+  ✓ UserService.java
+  ✓ RelayRecordService.java ★
+  ✓ CostCalculationService.java
+  ✓ DailyQuotaService.java
+  ✓ RelayService.java
+  ✓ ClaudeRelayAdapter.java
+  ✓ OpenAiRelayAdapter.java
+
+Repository 层 (4个关键):
+  ✓ SubscriptionRepository.java
+  ✓ UserRepository.java
+  ✓ RelayRecordRepository.java
+  ✓ DailyQuotaUsageRepository.java
+
+Model 层:
+  ✓ SubscriptionItem.java
+  ✓ UserItem.java
+  ✓ RelayRecordItem.java
+  ✓ GroupItem.java
+  ✓ MySubscriptionData.java
+
+Controller 层:
+  ✓ SubscriptionController.java
+  ✓ UserQuotaController.java
+  ✓ RelayController.java
+
+Database:
+  ✓ schema.sql (完整DDL)
+
+================================================================================
+
+生成时间: 2026-04-01
+项目: FirstApi (backend-0.0.1-SNAPSHOT)
+工具: Claude Code Analysis
+
+================================================================================

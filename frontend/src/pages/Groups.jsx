@@ -9,6 +9,7 @@ import {
     HelpCircle,
 } from 'lucide-react';
 import Modal from '../components/Modal';
+import Toast from '../components/Toast';
 import StatusBadge from '../components/StatusBadge';
 import EmptyState from '../components/EmptyState';
 import Pagination from '../components/Pagination';
@@ -37,7 +38,7 @@ function resolveAccountTypes(platform) {
 
 const BILLING_TYPE_CONFIG = {
     '标准（余额）': { color: '#10b981', bg: 'rgba(16, 185, 129, 0.1)', border: 'rgba(16, 185, 129, 0.25)' },
-    '订阅（配额）': { color: '#f97316', bg: 'rgba(249, 115, 22, 0.1)', border: 'rgba(249, 115, 22, 0.25)' },
+    '订阅（配额）': { color: '#f97316', bg: 'rgba(249, 115, 22, 0.1)', border: 'rgba(249, 115, 22, 0.25)' }, // 已弃用，仅用于兼容显示
 };
 
 function PlatformBadge({ platform }) {
@@ -55,7 +56,7 @@ function PlatformBadge({ platform }) {
     );
 }
 
-function BillingBadge({ billingType, billingAmount }) {
+function BillingBadge({ billingType }) {
     const config = BILLING_TYPE_CONFIG[billingType] || BILLING_TYPE_CONFIG['标准（余额）'];
     return (
         <div>
@@ -67,9 +68,6 @@ function BillingBadge({ billingType, billingAmount }) {
             }}>
                 {billingType}
             </span>
-            {billingAmount && (
-                <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '3px' }}>{billingAmount}</div>
-            )}
         </div>
     );
 }
@@ -119,6 +117,8 @@ export default function Groups() {
     const [sortConfig, setSortConfig] = useState({ key: 'id', direction: 'asc' });
     const [currentPage, setCurrentPage] = useState(1);
     const [pageSize, setPageSize] = useState(10);
+    const [toast, setToast] = useState(null);
+    const abortControllerRef = React.useRef(null);
 
     const filteredGroups = groups.filter((g) => {
         if (filterPlatform !== 'all' && g.platform !== filterPlatform) return false;
@@ -138,16 +138,23 @@ export default function Groups() {
     const total = sortedGroups.length;
     const totalPages = Math.max(1, Math.ceil(total / pageSize));
     const pagedGroups = sortedGroups.slice((currentPage - 1) * pageSize, currentPage * pageSize);
-    const startRow = total === 0 ? 0 : (currentPage - 1) * pageSize + 1;
-    const endRow = total === 0 ? 0 : Math.min(currentPage * pageSize, total);
-
     const loadData = (nextKeyword = keyword) => {
+        if (abortControllerRef.current) {
+            abortControllerRef.current.abort();
+        }
+        abortControllerRef.current = new AbortController();
+
         setIsLoading(true);
-        api.get('/admin/groups' + (nextKeyword ? '?keyword=' + encodeURIComponent(nextKeyword) : ''))
+        api.get('/admin/groups' + (nextKeyword ? '?keyword=' + encodeURIComponent(nextKeyword) : ''), {
+            signal: abortControllerRef.current.signal,
+        })
             .then((data) => {
                 setGroups(data.items || []);
             })
-            .catch((err) => alert(err.message || '加载分组失败'))
+            .catch((err) => {
+                if (err.name === 'AbortError') return;
+                setToast({ message: err.message || '加载分组失败', type: 'error' });
+            })
             .finally(() => setTimeout(() => setIsLoading(false), 300));
     };
 
@@ -160,6 +167,16 @@ export default function Groups() {
     };
 
     useEffect(() => {
+        // eslint-disable-next-line react-hooks/set-state-in-effect
+        loadData('');
+        return () => {
+            if (abortControllerRef.current) {
+                abortControllerRef.current.abort();
+            }
+        };
+    }, []);
+
+    useEffect(() => {
         const timer = setTimeout(() => {
             setCurrentPage(1);
             loadData(keyword);
@@ -168,6 +185,7 @@ export default function Groups() {
     }, [keyword]);
 
     useEffect(() => {
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         if (currentPage > totalPages) setCurrentPage(totalPages);
     }, [currentPage, totalPages]);
 
@@ -214,12 +232,12 @@ export default function Groups() {
         if (!window.confirm('确定要删除该分组吗？此操作不可恢复。')) return;
         api.del('/admin/groups/' + id)
             .then(() => loadData())
-            .catch((err) => alert(err.message || '操作失败'));
+            .catch((err) => setToast({ message: err.message || '操作失败', type: 'error' }));
     };
 
     const handleSubmit = () => {
         setFormError('');
-        const { fallbackGroup, modelRouting, ...payload } = formData;
+        const { fallbackGroup: _fallbackGroup, modelRouting, ...payload } = formData;
         const request = editingGroup
             ? api.put('/admin/groups/' + editingGroup.id, payload)
             : api.post('/admin/groups', payload);
@@ -247,6 +265,7 @@ export default function Groups() {
 
     return (
         <div className="page-content">
+            {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
             <div className="controls-row">
                 <div className="controls-group" style={{ flex: 1 }}>
                     <div className="select-control" style={{ width: '240px' }}>
@@ -313,8 +332,8 @@ export default function Groups() {
                             <th onClick={() => requestSort('platform')} style={{ cursor: 'pointer' }}>
                                 平台 <SortIcon column='platform' />
                             </th>
-                            <th onClick={() => requestSort('billingType')} style={{ cursor: 'pointer' }}>
-                                计费类型 <SortIcon column='billingType' />
+                            <th onClick={() => requestSort('accountType')} style={{ cursor: 'pointer' }}>
+                                账号类型 <SortIcon column='accountType' />
                             </th>
                             <th onClick={() => requestSort('rate')} style={{ cursor: 'pointer' }}>
                                 费率倍数 <SortIcon column='rate' />
@@ -343,7 +362,11 @@ export default function Groups() {
                                     <PlatformBadge platform={group.platform} />
                                 </td>
                                 <td>
-                                    <BillingBadge billingType={group.billingType} billingAmount={group.billingAmount} />
+                                    <span style={{
+                                        fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)',
+                                    }}>
+                                        {group.accountType || '-'}
+                                    </span>
                                 </td>
                                 <td>
                                     <span style={{ fontWeight: '600' }}>{group.rate}x</span>
@@ -507,35 +530,6 @@ export default function Groups() {
                         />
                     </div>
 
-                    <div className="form-group">
-                        <label className='form-label'>计费类型</label>
-                        <Select
-                            className="form-input"
-                            value={formData.billingType || '标准（余额）'}
-                            onChange={(e) => setFormData({ ...formData, billingType: e.target.value })}
-                            disabled={!!editingGroup}
-                        >
-                            <option>标准（余额）</option>
-                            <option>订阅（配额）</option>
-                        </Select>
-                        {editingGroup && (
-                            <span style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px', display: 'block' }}>创建后不可修改计费类型</span>
-                        )}
-                    </div>
-
-                    {formData.billingType === '订阅（配额）' && (
-                        <div className="form-group">
-                            <label className='form-label' htmlFor="group-billing-amount">每日配额金额</label>
-                            <input
-                                id="group-billing-amount"
-                                type="text"
-                                className="form-input"
-                                placeholder="例如 20"
-                                value={formData.billingAmount || ''}
-                                onChange={(e) => setFormData({ ...formData, billingAmount: e.target.value })}
-                            />
-                        </div>
-                    )}
                 </div>
             </Modal>
         </div>

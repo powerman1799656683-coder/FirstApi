@@ -12,6 +12,7 @@ public class RelayResult {
     private Integer completionTokens;
     private Integer totalTokens;
     private String provider;
+    private String authMethod;
     private String usageJson;
     private java.util.Map<String, String> responseHeaders = new java.util.LinkedHashMap<>();
 
@@ -101,6 +102,14 @@ public class RelayResult {
 
     public void setProvider(String provider) {
         this.provider = provider;
+    }
+
+    public String getAuthMethod() {
+        return authMethod;
+    }
+
+    public void setAuthMethod(String authMethod) {
+        this.authMethod = authMethod;
     }
 
     public String getUsageJson() {

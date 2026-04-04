@@ -85,7 +85,10 @@ class AccountServiceTest {
                 upstreamHttpClient,
                 relayProperties,
                 accountOAuthService,
-                relayAccountSelector
+                relayAccountSelector,
+                null,
+                null,
+                null
         );
         lenient().when(accountGroupBindingRepository.findAllGroupings()).thenReturn(Map.of());
     }

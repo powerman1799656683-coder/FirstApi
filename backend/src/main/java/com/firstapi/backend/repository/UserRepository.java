@@ -14,7 +14,7 @@ public class UserRepository extends JdbcListRepository<UserItem> {
         super(
                 jdbcTemplate,
                 "users",
-                new String[]{"email", "username", "balance", "group_name", "role_name", "status_name", "time_label"},
+                new String[]{"email", "username", "balance", "group_name", "role_name", "status_name", "time_label", "login_ip", "login_location"},
                 (rs, rowNum) -> new UserItem(
                         rs.getLong("id"),
                         rs.getString("email"),
@@ -23,7 +23,9 @@ public class UserRepository extends JdbcListRepository<UserItem> {
                         rs.getString("group_name"),
                         rs.getString("role_name"),
                         rs.getString("status_name"),
-                        rs.getString("time_label")
+                        rs.getString("time_label"),
+                        rs.getString("login_ip"),
+                        rs.getString("login_location")
                 )
         );
     }
@@ -31,6 +33,15 @@ public class UserRepository extends JdbcListRepository<UserItem> {
     @Override
     protected List<UserItem> defaultItems() {
         return Collections.emptyList();
+    }
+
+    public UserItem findByUsername(String username) {
+        List<UserItem> items = getJdbcTemplate().query(
+                "SELECT `id`, `email`, `username`, `balance`, `group_name`, `role_name`, `status_name`, `time_label`, `login_ip`, `login_location` FROM `users` WHERE `username` = ?",
+                getRowMapper(),
+                username
+        );
+        return items.isEmpty() ? null : items.get(0);
     }
 
     @Override
@@ -42,7 +53,9 @@ public class UserRepository extends JdbcListRepository<UserItem> {
                 item.getGroup(),
                 item.getRole(),
                 item.getStatus(),
-                item.getTime()
+                item.getTime(),
+                item.getLoginIp() != null ? item.getLoginIp() : "",
+                item.getLoginLocation() != null ? item.getLoginLocation() : ""
         };
     }
 }

@@ -12,6 +12,7 @@ import com.firstapi.backend.util.TimeSupport;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -24,13 +25,23 @@ public class RelayRecordService {
 
     private final RelayRecordRepository relayRecordRepository;
     private final CostCalculationService costService;
+    private final UserService userService;
+    private final SubscriptionService subscriptionService;
+    private final DailyQuotaService dailyQuotaService;
 
     public RelayRecordService(RelayRecordRepository relayRecordRepository,
-                              CostCalculationService costService) {
+                              CostCalculationService costService,
+                              UserService userService,
+                              SubscriptionService subscriptionService,
+                              DailyQuotaService dailyQuotaService) {
         this.relayRecordRepository = relayRecordRepository;
         this.costService = costService;
+        this.userService = userService;
+        this.subscriptionService = subscriptionService;
+        this.dailyQuotaService = dailyQuotaService;
     }
 
+    @Transactional
     public void record(ApiKeyItem apiKey, RelayRoute route, RelayResult result,
                        String model, GroupItem group) {
         // 解析分组倍率
@@ -97,6 +108,21 @@ public class RelayRecordService {
         // usage_json 快照
         item.setUsageJson(result.getUsageJson());
 
+        // 先落记录，再扣费——在同一事务内保证原子性；
+        // 若扣费失败事务回滚，记录也会一并撤销，避免"已记未扣"的不一致状态。
         relayRecordRepository.save(item);
+
+        if (item.getCost() != null && item.getCost().compareTo(BigDecimal.ZERO) > 0) {
+            Long groupId = group != null ? group.getId() : null;
+            if (subscriptionService.hasQuotaRemaining(apiKey.getOwnerId(), groupId)) {
+                // 当前分组有活跃订阅且额度剩余 → 扣对应分组的订阅额度
+                subscriptionService.deductQuota(apiKey.getOwnerId(), groupId, item.getCost());
+            } else {
+                // 无匹配订阅或额度耗尽 → 扣用户余额
+                userService.deductByAuthUserId(apiKey.getOwnerId(), item.getCost());
+            }
+            // 同步记录每日用量（用于每日配额检查）
+            dailyQuotaService.addCost(apiKey.getOwnerId(), item.getCost());
+        }
     }
 }

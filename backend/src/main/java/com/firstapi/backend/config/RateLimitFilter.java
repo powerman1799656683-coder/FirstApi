@@ -101,7 +101,10 @@ public class RateLimitFilter extends OncePerRequestFilter {
         }
         String xff = request.getHeader("X-Forwarded-For");
         if (xff != null && !xff.isEmpty()) {
-            String ip = xff.split(",")[0].trim();
+            // 取最后一个 IP：X-Forwarded-For 由左到右依次追加，最后一个是离信任代理最近的地址，
+            // 客户端无法伪造（需要穿透受信代理），取第一个则可被客户端随意注入绕过限流。
+            String[] parts = xff.split(",");
+            String ip = parts[parts.length - 1].trim();
             if (!ip.isEmpty()) {
                 return ip;
             }

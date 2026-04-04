@@ -23,11 +23,20 @@ class RelayRecordServiceTest {
     @Mock
     private CostCalculationService costCalculationService;
 
+    @Mock
+    private UserService userService;
+
+    @Mock
+    private SubscriptionService subscriptionService;
+
+    @Mock
+    private DailyQuotaService dailyQuotaService;
+
     private RelayRecordService relayRecordService;
 
     @BeforeEach
     void setUp() {
-        relayRecordService = new RelayRecordService(relayRecordRepository, costCalculationService);
+        relayRecordService = new RelayRecordService(relayRecordRepository, costCalculationService, userService, subscriptionService, dailyQuotaService);
     }
 
     @Test

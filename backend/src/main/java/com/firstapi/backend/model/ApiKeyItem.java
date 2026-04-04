@@ -20,6 +20,8 @@ public class ApiKeyItem implements SimpleStore.Identifiable {
     private String lastUsed;
     private Long groupId;
     private String groupName;
+    private Long requestCount;
+    private java.math.BigDecimal totalCost;
 
     public ApiKeyItem() {}
 
@@ -54,6 +56,10 @@ public class ApiKeyItem implements SimpleStore.Identifiable {
     public void setGroupId(Long groupId) { this.groupId = groupId; }
     public String getGroupName() { return groupName; }
     public void setGroupName(String groupName) { this.groupName = groupName; }
+    public Long getRequestCount() { return requestCount; }
+    public void setRequestCount(Long requestCount) { this.requestCount = requestCount; }
+    public java.math.BigDecimal getTotalCost() { return totalCost; }
+    public void setTotalCost(java.math.BigDecimal totalCost) { this.totalCost = totalCost; }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     public static class Request {

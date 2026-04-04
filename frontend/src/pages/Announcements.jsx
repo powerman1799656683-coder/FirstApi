@@ -99,7 +99,7 @@ export default function AnnouncementsPage() {
                         <Search size={16} color="var(--text-muted)" />
                         <input
                             type="text"
-                            placeholder=""
+                            placeholder="搜索公告标题"
                             value={keyword}
                             onChange={(e) => setKeyword(e.target.value)}
                             style={{ background: 'transparent', border: 'none', color: '#fff', outline: 'none', fontSize: '13px' }}

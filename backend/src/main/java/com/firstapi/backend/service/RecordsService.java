@@ -32,11 +32,21 @@ public class RecordsService {
         long activeKeys = relayRecordRepository.countDistinctApiKeys();
         double avgLatency = relayRecordRepository.avgLatencyMs();
 
+        // 今日/昨日对比
+        BigDecimal costToday = relayRecordRepository.sumCostToday();
+        BigDecimal costYesterday = relayRecordRepository.sumCostYesterday();
+        long tokensToday = relayRecordRepository.sumTotalTokensToday();
+        long tokensYesterday = relayRecordRepository.sumTotalTokensYesterday();
+        long keysToday = relayRecordRepository.countDistinctApiKeysToday();
+        long keysYesterday = relayRecordRepository.countDistinctApiKeysYesterday();
+        double latencyToday = relayRecordRepository.avgLatencyMsToday();
+        double latencyYesterday = relayRecordRepository.avgLatencyMsYesterday();
+
         data.stats = List.of(
-                new StatCard("总调用成本", formatCost(totalCost), "", "zap", "#ef4444"),
-                new StatCard("总消耗令牌", formatTokens(totalTokens), "", "activity", "#10b981"),
-                new StatCard("活跃 API 密钥", String.valueOf(activeKeys), "", "database", "#3b82f6"),
-                new StatCard("平均响应耗时", formatLatency(avgLatency), "", "clock", "#00f2ff")
+                new StatCard("总调用成本", formatCost(totalCost), trendDecimal(costToday, costYesterday), "zap", "#ef4444"),
+                new StatCard("总消耗令牌", formatTokens(totalTokens), trendLong(tokensToday, tokensYesterday), "activity", "#10b981"),
+                new StatCard("活跃 API 密钥", String.valueOf(activeKeys), trendLong(keysToday, keysYesterday), "database", "#3b82f6"),
+                new StatCard("平均响应耗时", formatLatency(avgLatency), trendLatency(latencyToday, latencyYesterday), "clock", "#00f2ff")
         );
 
         // 模型分布饼图
@@ -55,7 +65,8 @@ public class RecordsService {
         List<RelayRecordRepository.DayStat> dayStats = relayRecordRepository.groupByDate(7);
         List<BarPoint> bar = new ArrayList<>();
         for (RelayRecordRepository.DayStat ds : dayStats) {
-            bar.add(new BarPoint(ds.date(), (int) Math.min(ds.totalTokens(), Integer.MAX_VALUE)));
+            double tokensInWan = ds.totalTokens() / 1_000_000.0;
+            bar.add(new BarPoint(ds.date(), Math.round(tokensInWan * 100.0) / 100.0));
         }
         data.bar = bar;
 
@@ -83,6 +94,28 @@ public class RecordsService {
         data.records = records;
         data.models = relayRecordRepository.distinctModels();
         return data;
+    }
+
+    private String trendDecimal(BigDecimal today, BigDecimal yesterday) {
+        BigDecimal diff = today.subtract(yesterday);
+        if (diff.compareTo(BigDecimal.ZERO) == 0) return "持平";
+        String sign = diff.compareTo(BigDecimal.ZERO) > 0 ? "+" : "";
+        return sign + diff.setScale(2, RoundingMode.HALF_UP).stripTrailingZeros().toPlainString();
+    }
+
+    private String trendLong(long today, long yesterday) {
+        long diff = today - yesterday;
+        if (diff == 0) return "持平";
+        String sign = diff > 0 ? "+" : "";
+        return sign + diff;
+    }
+
+    private String trendLatency(double today, double yesterday) {
+        double diff = today - yesterday;
+        if (Math.abs(diff) < 1) return "持平";
+        String sign = diff > 0 ? "+" : "";
+        if (Math.abs(diff) >= 1000) return sign + String.format("%.2fs", diff / 1000.0);
+        return sign + String.format("%.0fms", diff);
     }
 
     private String formatCost(BigDecimal cost) {

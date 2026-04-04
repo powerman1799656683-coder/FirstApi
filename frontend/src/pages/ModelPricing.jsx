@@ -447,7 +447,7 @@ export default function ModelPricing() {
                         const fb = group.fallback;
 
                         return (
-                            <div key={provider} className="chart-card" style={{ padding: 0, overflow: 'hidden' }}>
+                            <div key={provider} className="chart-card" style={{ padding: 0, overflow: 'visible' }}>
                                 {/* Provider header */}
                                 <div
                                     onClick={() => toggleCollapse(provider)}

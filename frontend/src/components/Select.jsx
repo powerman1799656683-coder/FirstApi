@@ -1,10 +1,13 @@
 import React, { useState, useRef, useEffect } from 'react';
+import ReactDOM from 'react-dom';
 import { ChevronDown, Check } from 'lucide-react';
 
-const Select = ({ value, onChange, children, className, placeholder, style, disabled }) => {
+const Select = ({ value, onChange, children, className, placeholder, style, disabled, dropUp }) => {
     const [isOpen, setIsOpen] = useState(false);
     const [focusedIndex, setFocusedIndex] = useState(-1);
     const containerRef = useRef(null);
+    const triggerRef = useRef(null);
+    const [dropStyle, setDropStyle] = useState(null);
 
     // Extract options from children
     const options = React.Children.map(children, child => {
@@ -18,16 +21,30 @@ const Select = ({ value, onChange, children, className, placeholder, style, disa
 
     const toggleOpen = () => {
         if (disabled) return;
-        setIsOpen(!isOpen);
-        if (!isOpen) {
+        const willOpen = !isOpen;
+        setIsOpen(willOpen);
+        if (willOpen) {
             const idx = options.findIndex(opt => opt.value === value);
             setFocusedIndex(idx >= 0 ? idx : 0);
+            if (dropUp && triggerRef.current) {
+                const rect = triggerRef.current.getBoundingClientRect();
+                setDropStyle({
+                    position: 'fixed',
+                    left: rect.left,
+                    bottom: window.innerHeight - rect.top + 8,
+                    minWidth: rect.width,
+                    zIndex: 9999,
+                });
+            }
         }
     };
 
+    const portalRef = useRef(null);
+
     useEffect(() => {
         const handleClickOutside = (event) => {
-            if (containerRef.current && !containerRef.current.contains(event.target)) {
+            if (containerRef.current && !containerRef.current.contains(event.target) &&
+                (!portalRef.current || !portalRef.current.contains(event.target))) {
                 setIsOpen(false);
             }
         };
@@ -100,6 +117,7 @@ const Select = ({ value, onChange, children, className, placeholder, style, disa
     return (
         <div ref={containerRef} className="custom-select-container" style={style}>
             <div
+                ref={triggerRef}
                 className={triggerClassName}
                 onClick={toggleOpen}
                 onKeyDown={handleKeyDown}
@@ -113,7 +131,7 @@ const Select = ({ value, onChange, children, className, placeholder, style, disa
                 <ChevronDown size={14} className={`select-arrow ${isOpen ? 'open' : ''}`} style={{ opacity: 0.6 }} />
             </div>
 
-            {isOpen && (
+            {isOpen && !dropUp && (
                 <div className="custom-select-options" role="listbox">
                     {options.map((opt, i) => (
                         <div
@@ -129,6 +147,25 @@ const Select = ({ value, onChange, children, className, placeholder, style, disa
                         </div>
                     ))}
                 </div>
+            )}
+
+            {isOpen && dropUp && ReactDOM.createPortal(
+                <div ref={portalRef} className="custom-select-options custom-select-options--up" role="listbox" style={dropStyle || {}}>
+                    {options.map((opt, i) => (
+                        <div
+                            key={i}
+                            className={`custom-option ${opt.value === value ? 'selected' : ''} ${opt.disabled ? 'disabled' : ''} ${i === focusedIndex ? 'focused' : ''}`}
+                            onClick={() => handleSelect(opt.value, opt.disabled)}
+                            role="option"
+                            aria-selected={opt.value === value}
+                            aria-disabled={opt.disabled || undefined}
+                        >
+                            <span>{opt.label}</span>
+                            {opt.value === value && <Check size={14} className="selected-check" />}
+                        </div>
+                    ))}
+                </div>,
+                document.body
             )}
         </div>
     );

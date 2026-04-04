@@ -7,7 +7,6 @@ const DEFAULT_FORM = {
     siteName: '',
     siteAnnouncement: '',
     registrationOpen: true,
-    defaultGroup: '默认组',
 };
 
 function mapSettingsToForm(data) {
@@ -15,7 +14,6 @@ function mapSettingsToForm(data) {
         siteName: data?.siteName || '',
         siteAnnouncement: data?.siteAnnouncement || '',
         registrationOpen: data?.registrationOpen !== undefined ? data.registrationOpen : true,
-        defaultGroup: data?.defaultGroup || '默认组',
     };
 }
 
@@ -25,22 +23,8 @@ export default function SettingsPage() {
     const [saved, setSaved] = useState(false);
     const [saveError, setSaveError] = useState('');
     const [form, setForm] = useState(DEFAULT_FORM);
-    const [availableGroups, setAvailableGroups] = useState([]);
-
     useEffect(() => {
         let alive = true;
-        api.get('/admin/groups')
-            .then((data) => {
-                if (alive) {
-                    const groupNames = (data.items || []).map(g => g.name);
-                    // Ensure '默认组' is in the list if not present, and handle uniqueness
-                    const uniqueGroups = Array.from(new Set(['默认组', ...groupNames]));
-                    setAvailableGroups(uniqueGroups);
-                }
-            })
-            .catch(() => {
-                if (alive) setAvailableGroups(['默认组']);
-            });
 
         api.get('/admin/settings')
             .then((data) => {
@@ -74,7 +58,6 @@ export default function SettingsPage() {
             siteName: form.siteName,
             siteAnnouncement: form.siteAnnouncement,
             registrationOpen: form.registrationOpen,
-            defaultGroup: form.defaultGroup,
         })
             .then(() => {
                 setSaved(true);
@@ -152,22 +135,6 @@ export default function SettingsPage() {
                                 >
                                     <span className="settings-switch-knob" />
                                 </button>
-                            </div>
-
-                             <div className="form-group">
-                                <label className="form-label" htmlFor="settings-default-group">默认分组</label>
-                                <select
-                                    id="settings-default-group"
-                                    data-testid="settings-default-group"
-                                    className="form-input"
-                                    value={form.defaultGroup}
-                                    onChange={(event) => handleChange('defaultGroup', event.target.value)}
-                                    style={{ background: 'var(--surface-secondary)', color: 'var(--text-primary)', border: '1px solid var(--border-color)', borderRadius: '8px', cursor: 'pointer' }}
-                                >
-                                    {availableGroups.map(name => (
-                                        <option key={name} value={name}>{name}</option>
-                                    ))}
-                                </select>
                             </div>
                         </div>
                     </div>

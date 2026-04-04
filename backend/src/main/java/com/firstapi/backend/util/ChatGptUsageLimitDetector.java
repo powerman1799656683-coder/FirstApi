@@ -55,6 +55,15 @@ public final class ChatGptUsageLimitDetector {
     );
 
     /**
+     * Pattern for Codex-style messages:
+     * "Your rate limit resets on Mar 27, 2026, 9:18 AM."
+     */
+    private static final Pattern RESETS_ON_PATTERN = Pattern.compile(
+            "resets\\s+on\\s+(.+?)(?:\\.|$)",
+            Pattern.CASE_INSENSITIVE
+    );
+
+    /**
      * Formatters for various date patterns found in ChatGPT responses.
      * "Mar 27th, 2026 9:18 AM" → need to strip ordinal suffixes (st, nd, rd, th)
      */
@@ -82,6 +91,11 @@ public final class ChatGptUsageLimitDetector {
             new DateTimeFormatterBuilder()
                     .parseCaseInsensitive()
                     .appendPattern("MMM d yyyy h:mm a")
+                    .toFormatter(Locale.ENGLISH),
+            // Mar 27, 2026, 9:18 AM (Codex-style, extra comma after year)
+            new DateTimeFormatterBuilder()
+                    .parseCaseInsensitive()
+                    .appendPattern("MMM d, yyyy, h:mm a")
                     .toFormatter(Locale.ENGLISH),
     };
 
@@ -114,7 +128,11 @@ public final class ChatGptUsageLimitDetector {
         }
         Matcher matcher = RETRY_AT_PATTERN.matcher(body);
         if (!matcher.find()) {
-            return -1;
+            // Try Codex-style "resets on ..." pattern
+            matcher = RESETS_ON_PATTERN.matcher(body);
+            if (!matcher.find()) {
+                return -1;
+            }
         }
         String rawDate = matcher.group(1).trim();
         // Strip ordinal suffixes: 27th → 27, 1st → 1, 2nd → 2, 3rd → 3

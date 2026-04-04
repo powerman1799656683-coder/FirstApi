@@ -14,9 +14,11 @@ import org.springframework.stereotype.Service;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+import java.util.function.Supplier;
 
 @Service
 public class RelayService {
@@ -50,6 +52,10 @@ public class RelayService {
     private final QuotaStateManager quotaStateManager;
     private final GroupRepository groupRepository;
     private final ObjectMapper objectMapper;
+    private final UserService userService;
+    private final SubscriptionService subscriptionService;
+    private final DailyQuotaService dailyQuotaService;
+    private final OAuthTokenRefreshService oauthTokenRefreshService;
 
     public RelayService(RelayApiKeyAuthService relayApiKeyAuthService,
                         RelayModelRouter relayModelRouter,
@@ -59,7 +65,11 @@ public class RelayService {
                         RelayAccountSelector relayAccountSelector,
                         QuotaStateManager quotaStateManager,
                         GroupRepository groupRepository,
-                        ObjectMapper objectMapper) {
+                        ObjectMapper objectMapper,
+                        UserService userService,
+                        SubscriptionService subscriptionService,
+                        DailyQuotaService dailyQuotaService,
+                        OAuthTokenRefreshService oauthTokenRefreshService) {
         this.relayApiKeyAuthService = relayApiKeyAuthService;
         this.relayModelRouter = relayModelRouter;
         this.openAiRelayAdapter = openAiRelayAdapter;
@@ -69,7 +79,122 @@ public class RelayService {
         this.quotaStateManager = quotaStateManager;
         this.groupRepository = groupRepository;
         this.objectMapper = objectMapper;
+        this.userService = userService;
+        this.subscriptionService = subscriptionService;
+        this.dailyQuotaService = dailyQuotaService;
+        this.oauthTokenRefreshService = oauthTokenRefreshService;
     }
+
+    // ==================== 流式转发入口 ====================
+
+    /**
+     * 流式 Responses API：认证/计费后，通过 outputStream 直接管道转发 SSE。
+     * 流结束后执行 record + syncQuotaRuntimeState。
+     */
+    public RelayResult relayResponsesApiStreaming(String authorization, JsonNode requestBody,
+                                                   java.io.OutputStream outputStream) {
+        String model = requestBody.path("model").asText(null);
+        if (model == null || model.trim().isEmpty()) {
+            throw new RelayException(HttpStatus.BAD_REQUEST, "Model is required", "invalid_request");
+        }
+
+        ApiKeyItem apiKey = relayApiKeyAuthService.authenticate(authorization);
+        RelayRoute route = relayModelRouter.route(model);
+        GroupItem group = resolveGroup(apiKey);
+        checkBilling(apiKey, group);
+        validateGroupPlatform(route, group);
+        String groupAccountType = resolveGroupAccountType(group);
+
+        RelayExecutionOutcome outcome;
+        try {
+            if ("openai".equals(route.getProvider())) {
+                outcome = executeWithSingleOauthRefreshRetry(() ->
+                        openAiRelayAdapter.relayResponsesStreaming(requestBody, route, groupAccountType, outputStream));
+            } else {
+                throw new RelayException(HttpStatus.BAD_REQUEST, "Unsupported model for responses API", "unsupported_model");
+            }
+        } finally {
+            // 确保无论是否出现异常，都尝试 flush 输出流，避免客户端悬挂
+            try { outputStream.flush(); } catch (java.io.IOException ignored) {}
+        }
+
+        RelayResult result = outcome.result();
+        relayRecordService.record(apiKey, route, result, model, group);
+        syncQuotaRuntimeState(result, outcome.oauthRefreshAttempted(), outcome.oauthRefreshSucceeded());
+        return result;
+    }
+
+    /**
+     * 流式 Chat Completions (OpenAI 模型)：管道转发 SSE。
+     * Claude 模型仍需缓冲（格式转换），走非流式路径。
+     */
+    public RelayResult relayChatCompletionStreaming(String authorization, RelayChatCompletionRequest request,
+                                                     java.io.OutputStream outputStream) {
+        RelayRoute route = validateAndResolveChatCompletionRoute(request);
+
+        ApiKeyItem apiKey = relayApiKeyAuthService.authenticate(authorization);
+        GroupItem group = resolveGroup(apiKey);
+        checkBilling(apiKey, group);
+        validateGroupPlatform(route, group);
+        String groupAccountType = resolveGroupAccountType(group);
+
+        RelayExecutionOutcome outcome;
+        try {
+            if ("openai".equals(route.getProvider())) {
+                outcome = executeWithSingleOauthRefreshRetry(() ->
+                        openAiRelayAdapter.relayStreaming(request, route, groupAccountType, outputStream));
+            } else {
+                // Claude 模型：流式需要格式转换，仍走同步缓冲路径
+                return relayChatCompletion(authorization, request);
+            }
+        } finally {
+            // 确保无论是否出现异常，都尝试 flush 输出流，避免客户端悬挂
+            try { outputStream.flush(); } catch (java.io.IOException ignored) {}
+        }
+
+        RelayResult result = outcome.result();
+        relayRecordService.record(apiKey, route, result, request.getModel(), group);
+        syncQuotaRuntimeState(result, outcome.oauthRefreshAttempted(), outcome.oauthRefreshSucceeded());
+        return result;
+    }
+
+    /**
+     * 流式 Claude /v1/messages：原生格式直转发。
+     */
+    public RelayResult relayClaudeMessagesStreaming(String xApiKey, String authorization,
+                                                     String anthropicVersion, JsonNode requestBody,
+                                                     java.io.OutputStream outputStream) {
+        validateClaudeMessagesRequest(requestBody);
+
+        String model = requestBody.path("model").asText(null);
+        ApiKeyItem apiKey = relayApiKeyAuthService.authenticateFlexible(authorization, xApiKey);
+        RelayRoute route = relayModelRouter.route(model);
+        if (!"claude".equals(route.getProvider())) {
+            throw new RelayException(HttpStatus.BAD_REQUEST, "Unsupported model", "unsupported_model");
+        }
+
+        GroupItem group = resolveGroup(apiKey);
+        checkBilling(apiKey, group);
+        validateGroupPlatform(route, group);
+        String groupAccountType = resolveGroupAccountType(group);
+
+        RelayExecutionOutcome outcome;
+        try {
+            outcome = executeWithSingleOauthRefreshRetry(() ->
+                    claudeRelayAdapter.relayMessagesStreaming(
+                            requestBody, route, groupAccountType, anthropicVersion, outputStream));
+        } finally {
+            // 确保无论是否出现异常，都尝试 flush 输出流，避免客户端悬挂
+            try { outputStream.flush(); } catch (java.io.IOException ignored) {}
+        }
+
+        RelayResult result = outcome.result();
+        relayRecordService.record(apiKey, route, result, model, group);
+        syncQuotaRuntimeState(result, outcome.oauthRefreshAttempted(), outcome.oauthRefreshSucceeded());
+        return result;
+    }
+
+    // ==================== 非流式转发入口 ====================
 
     public RelayResult relayResponsesApi(String authorization, JsonNode requestBody) {
         String model = requestBody.path("model").asText(null);
@@ -80,39 +205,45 @@ public class RelayService {
         ApiKeyItem apiKey = relayApiKeyAuthService.authenticate(authorization);
         RelayRoute route = relayModelRouter.route(model);
         GroupItem group = resolveGroup(apiKey);
+        checkBilling(apiKey, group);
         validateGroupPlatform(route, group);
         String groupAccountType = resolveGroupAccountType(group);
 
-        RelayResult result;
+        RelayExecutionOutcome outcome;
         if ("openai".equals(route.getProvider())) {
-            result = openAiRelayAdapter.relayResponses(requestBody, route, groupAccountType);
+            outcome = executeWithSingleOauthRefreshRetry(() ->
+                    openAiRelayAdapter.relayResponses(requestBody, route, groupAccountType));
         } else {
             throw new RelayException(HttpStatus.BAD_REQUEST, "Unsupported model for responses API", "unsupported_model");
         }
 
+        RelayResult result = outcome.result();
         relayRecordService.record(apiKey, route, result, model, group);
-        syncQuotaRuntimeState(result);
+        syncQuotaRuntimeState(result, outcome.oauthRefreshAttempted(), outcome.oauthRefreshSucceeded());
         return result;
     }
 
     public RelayResult relayChatCompletion(String authorization, RelayChatCompletionRequest request) {
-        validateRequest(request);
+        RelayRoute route = validateAndResolveChatCompletionRoute(request);
 
         ApiKeyItem apiKey = relayApiKeyAuthService.authenticate(authorization);
-        RelayRoute route = relayModelRouter.route(request.getModel());
         GroupItem group = resolveGroup(apiKey);
+        checkBilling(apiKey, group);
         validateGroupPlatform(route, group);
         String groupAccountType = resolveGroupAccountType(group);
-        RelayResult result;
+        RelayExecutionOutcome outcome;
         if ("openai".equals(route.getProvider())) {
-            result = openAiRelayAdapter.relay(request, route, groupAccountType);
+            outcome = executeWithSingleOauthRefreshRetry(() ->
+                    openAiRelayAdapter.relay(request, route, groupAccountType));
         } else if ("claude".equals(route.getProvider())) {
-            result = claudeRelayAdapter.relay(request, route, groupAccountType);
+            outcome = executeWithSingleOauthRefreshRetry(() ->
+                    claudeRelayAdapter.relay(request, route, groupAccountType));
         } else {
             throw new RelayException(HttpStatus.BAD_REQUEST, "Unsupported model", "unsupported_model");
         }
+        RelayResult result = outcome.result();
         relayRecordService.record(apiKey, route, result, request.getModel(), group);
-        syncQuotaRuntimeState(result);
+        syncQuotaRuntimeState(result, outcome.oauthRefreshAttempted(), outcome.oauthRefreshSucceeded());
         return result;
     }
 
@@ -127,12 +258,15 @@ public class RelayService {
         }
 
         GroupItem group = resolveGroup(apiKey);
+        checkBilling(apiKey, group);
         validateGroupPlatform(route, group);
         String groupAccountType = resolveGroupAccountType(group);
 
-        RelayResult result = claudeRelayAdapter.relayMessages(requestBody, route, groupAccountType, anthropicVersion);
+        RelayExecutionOutcome outcome = executeWithSingleOauthRefreshRetry(() ->
+                claudeRelayAdapter.relayMessages(requestBody, route, groupAccountType, anthropicVersion));
+        RelayResult result = outcome.result();
         relayRecordService.record(apiKey, route, result, model, group);
-        syncQuotaRuntimeState(result);
+        syncQuotaRuntimeState(result, outcome.oauthRefreshAttempted(), outcome.oauthRefreshSucceeded());
         return result;
     }
 
@@ -141,13 +275,81 @@ public class RelayService {
     /** Short cooldown (seconds) for platform overload (529/503). */
     private static final int OVERLOAD_COOLDOWN_SECONDS = 30;
 
+    private RelayExecutionOutcome executeWithSingleOauthRefreshRetry(Supplier<RelayResult> upstreamCall) {
+        RelayResult firstResult = upstreamCall.get();
+        if (!isRetryableOauthAuthenticationFailure(firstResult)) {
+            return new RelayExecutionOutcome(firstResult, false, false);
+        }
+
+        boolean refreshed = oauthTokenRefreshService.tryRefreshNow(firstResult.getAccountId());
+        if (!refreshed) {
+            return new RelayExecutionOutcome(firstResult, true, false);
+        }
+
+        LOGGER.info("Account {} OAuth token refreshed successfully after 401, retrying request once, provider={}",
+                firstResult.getAccountId(), firstResult.getProvider());
+        RelayResult retryResult = upstreamCall.get();
+        return new RelayExecutionOutcome(retryResult, true, true);
+    }
+
+    private boolean isRetryableOauthAuthenticationFailure(RelayResult result) {
+        if (result == null || result.getAccountId() == null) {
+            return false;
+        }
+        if (result.getStatusCode() != 401) {
+            return false;
+        }
+        if (!"OAuth".equalsIgnoreCase(result.getAuthMethod())) {
+            return false;
+        }
+        return isOAuthTokenExpiredResponse(result.getBody());
+    }
+
+    /**
+     * 判断 401 响应体是否表示 OAuth token 过期/失效。
+     * 兼容多种格式：
+     * - Anthropic: {"error":{"type":"authentication_error"}}
+     * - OpenAI API: {"error":{"type":"authentication_error","code":"invalid_api_key"}}
+     * - ChatGPT OAuth: {"error":{"type":null,"code":"token_expired"}}
+     * - ChatGPT detail: {"detail":{"code":"token_expired"}}
+     */
+    private boolean isOAuthTokenExpiredResponse(String body) {
+        if (body == null || body.isEmpty()) return true; // 无 body 的 401 也视为 token 过期
+        String errorType = extractErrorType(body);
+        if ("authentication_error".equalsIgnoreCase(errorType)) {
+            return true;
+        }
+        String errorCode = extractErrorCode(body);
+        if ("token_expired".equalsIgnoreCase(errorCode) || "invalid_api_key".equalsIgnoreCase(errorCode)) {
+            return true;
+        }
+        // ChatGPT detail.code 格式
+        try {
+            JsonNode root = objectMapper.readTree(body);
+            String detailCode = root.path("detail").path("code").asText(null);
+            if ("token_expired".equalsIgnoreCase(detailCode)) {
+                return true;
+            }
+        } catch (Exception ignored) {}
+        return false;
+    }
+
     private void syncQuotaRuntimeState(RelayResult result) {
+        syncQuotaRuntimeState(result, false, false);
+    }
+
+    private void syncQuotaRuntimeState(RelayResult result,
+                                       boolean oauthRefreshAttempted,
+                                       boolean oauthRefreshSucceeded) {
         if (result == null || result.getAccountId() == null) {
             return;
         }
 
         // --- ChatGPT OAuth usage limit detection (may come on any status code, including 200) ---
-        if (com.firstapi.backend.util.ChatGptUsageLimitDetector.isUsageLimitResponse(result.getBody())) {
+        // Only apply to OpenAI provider — Claude/other upstream 429s may contain generic
+        // keywords like "too many requests" that would bypass the OAuth protection in handle429.
+        if ("openai".equals(result.getProvider())
+                && com.firstapi.backend.util.ChatGptUsageLimitDetector.isUsageLimitResponse(result.getBody())) {
             int recoverySecs = com.firstapi.backend.util.ChatGptUsageLimitDetector
                     .parseRecoveryCooldownSeconds(result.getBody());
             if (recoverySecs > 0) {
@@ -194,11 +396,8 @@ public class RelayService {
             return;
         }
 
-        // --- 401 authentication error ---
         if (status == 401) {
-            // Don't cooldown, but log for admin attention
-            LOGGER.warn("Account {} received 401 authentication error, provider={}, errorType={}",
-                    result.getAccountId(), provider, errorType);
+            handleAuthenticationFailure(result, provider, errorType, oauthRefreshAttempted, oauthRefreshSucceeded);
             return;
         }
 
@@ -231,12 +430,21 @@ public class RelayService {
         if ("claude".equals(provider)) {
             // Claude 429: all are rate_limit_error, cannot distinguish quota vs rate limit by type alone.
             // Must inspect message content to detect true quota exhaustion.
-            if ("billing_error".equals(errorType) || isQuotaMessageInBody(result.getBody())) {
+            boolean quotaLike = "billing_error".equals(errorType) || isQuotaMessageInBody(result.getBody());
+            boolean isOAuth = "OAuth".equalsIgnoreCase(result.getAuthMethod());
+
+            if (quotaLike && !isOAuth) {
+                // API Key accounts: quota exhaustion triggers persistent cooldown
                 String reason = "billing_error".equals(errorType) ? "claude_billing_error" : "claude_credit_exhausted";
                 markQuotaExhausted(accountId, reason);
                 return;
             }
-            // True rate limit: use retry-after with fallback
+            if (quotaLike && isOAuth) {
+                // OAuth/subscription accounts don't have credit balance — treat as rate limit
+                LOGGER.warn("Account {} Claude OAuth 429 with quota-like message, treating as rate limit. body: {}",
+                        accountId, truncate(result.getBody(), 300));
+            }
+            // Rate limit: use retry-after with fallback
             int cooldownSeconds = parseRetryAfterSeconds(result);
             relayAccountSelector.cooldownAccount(accountId, cooldownSeconds, "claude_rate_limit", "claude");
             LOGGER.info("Account {} Claude rate-limited, cooldown {}s", accountId, cooldownSeconds);
@@ -251,6 +459,43 @@ public class RelayService {
 
     private int parseRetryAfterSeconds(RelayResult result) {
         return com.firstapi.backend.util.RetryAfterParser.parseSeconds(result);
+    }
+
+    private void handleAuthenticationFailure(RelayResult result,
+                                             String provider,
+                                             String errorType,
+                                             boolean oauthRefreshAttempted,
+                                             boolean oauthRefreshSucceeded) {
+        // 非 OAuth 账号的 401 不做自动处理
+        if (!"OAuth".equalsIgnoreCase(result.getAuthMethod())) {
+            LOGGER.warn("Account {} received 401, provider={}, errorType={}, authMethod={}, no action taken",
+                    result.getAccountId(), provider, errorType, result.getAuthMethod());
+            return;
+        }
+
+        // OAuth 账号 401 → 尝试刷新 token 或暂停调度
+        if (oauthRefreshAttempted) {
+            markQuotaExhausted(result.getAccountId(), "oauth_token_expired");
+            if (oauthRefreshSucceeded) {
+                LOGGER.warn("Account {} still received OAuth 401 after refresh retry, auto-disabled scheduling, provider={}",
+                        result.getAccountId(), provider);
+            } else {
+                LOGGER.warn("Account {} OAuth token expired and refresh failed, auto-disabled scheduling, provider={}",
+                        result.getAccountId(), provider);
+            }
+            return;
+        }
+
+        boolean refreshed = oauthTokenRefreshService.tryRefreshNow(result.getAccountId());
+        if (refreshed) {
+            LOGGER.info("Account {} OAuth token refreshed successfully after 401, provider={}",
+                    result.getAccountId(), provider);
+        } else {
+            // 刷新失败（无 refresh_token 或 token 被吊销）→ 直接暂停调度，避免反复无效请求
+            markQuotaExhausted(result.getAccountId(), "oauth_token_expired");
+            LOGGER.warn("Account {} OAuth token expired and refresh failed, auto-disabled scheduling, provider={}",
+                    result.getAccountId(), provider);
+        }
     }
 
     private String extractErrorType(String body) {
@@ -303,6 +548,13 @@ public class RelayService {
         return value == null ? "unknown" : value;
     }
 
+    private RelayRoute validateAndResolveChatCompletionRoute(RelayChatCompletionRequest request) {
+        validateRequest(request);
+        RelayRoute route = relayModelRouter.route(request.getModel());
+        validateProviderSpecificRequest(route, request);
+        return route;
+    }
+
     private void validateRequest(RelayChatCompletionRequest request) {
         if (request == null || request.getModel() == null || request.getModel().trim().isEmpty()) {
             throw new RelayException(HttpStatus.BAD_REQUEST, "Model is required", "invalid_request");
@@ -312,6 +564,17 @@ public class RelayService {
         }
         if (request.hasUnsupportedFields()) {
             throw new RelayException(HttpStatus.BAD_REQUEST, "Unsupported request fields", "invalid_request");
+        }
+    }
+
+    private void validateProviderSpecificRequest(RelayRoute route, RelayChatCompletionRequest request) {
+        if (!request.hasOpenAiToolCallingFields()) {
+            return;
+        }
+        if (!"openai".equals(route.getProvider())) {
+            throw new RelayException(HttpStatus.BAD_REQUEST,
+                    "OpenAI tool calling is only supported for OpenAI models",
+                    "invalid_request");
         }
     }
 
@@ -327,6 +590,41 @@ public class RelayService {
         if (!messages.isArray() || messages.isEmpty()) {
             throw new RelayException(HttpStatus.BAD_REQUEST, "Messages are required", "invalid_request");
         }
+    }
+
+    private void checkBilling(ApiKeyItem apiKey, GroupItem group) {
+        Long ownerId = apiKey.getOwnerId();
+        Long groupId = group != null ? group.getId() : null;
+
+        // 检查当前分组的订阅总配额
+        com.firstapi.backend.model.SubscriptionItem activeSub = subscriptionService.getActiveSubscription(ownerId, groupId);
+        boolean subscriptionAvailable = subscriptionService.hasQuotaRemaining(ownerId, groupId);
+
+        if (subscriptionAvailable) {
+            // 有订阅额度剩余时，再检查每日配额
+            if (activeSub != null && activeSub.getDailyLimit() != null && !activeSub.getDailyLimit().isBlank()) {
+                try {
+                    java.math.BigDecimal dailyLimit = new java.math.BigDecimal(activeSub.getDailyLimit().trim());
+                    if (!dailyQuotaService.checkDailyQuota(ownerId, dailyLimit)) {
+                        // 每日订阅配额超限 → 降级检查余额
+                        if (userService.checkBalanceByAuthUserId(ownerId)) {
+                            return;
+                        }
+                        throw new RelayException(HttpStatus.TOO_MANY_REQUESTS,
+                                "\u4eca\u65e5\u914d\u989d\u5df2\u7528\u5c3d\u4e14\u4f59\u989d\u4e0d\u8db3", "daily_quota_exhausted");
+                    }
+                } catch (NumberFormatException ignored) {
+                }
+            }
+            return;
+        }
+
+        // 订阅额度耗尽或无订阅 → 检查余额
+        if (userService.checkBalanceByAuthUserId(ownerId)) {
+            return;
+        }
+        throw new RelayException(HttpStatus.TOO_MANY_REQUESTS,
+                "\u8ba2\u9605\u989d\u5ea6\u5df2\u7528\u5c3d\u4e14\u4f59\u989d\u4e0d\u8db3", "quota_exhausted");
     }
 
     private GroupItem resolveGroup(ApiKeyItem apiKey) {
@@ -370,6 +668,10 @@ public class RelayService {
     }
 
     private record ErrorInfo(String matchedField, boolean typeOrCodeMatch) {}
+
+    private record RelayExecutionOutcome(RelayResult result,
+                                         boolean oauthRefreshAttempted,
+                                         boolean oauthRefreshSucceeded) {}
 
     private ErrorInfo extractErrorInfo(String body) {
         if (body == null || body.isEmpty()) return null;

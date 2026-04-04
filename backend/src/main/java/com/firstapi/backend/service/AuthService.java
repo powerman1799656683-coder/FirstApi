@@ -69,6 +69,29 @@ public class AuthService {
                     "USER"
             );
         }
+
+        // 确保所有 auth_users 在 users 业务表中都有对应记录
+        syncAuthUserToBusinessTable(authProperties.getAdminUsername(), authProperties.getAdminEmail(), "ADMIN");
+        if (authProperties.isUserEnabled() && !ValidationSupport.isBlank(authProperties.getUserPassword())) {
+            syncAuthUserToBusinessTable(authProperties.getUserUsername(), authProperties.getUserEmail(), "USER");
+        }
+    }
+
+    private void syncAuthUserToBusinessTable(String username, String email, String role) {
+        if (ValidationSupport.isBlank(username)) return;
+        if (userRepository.findByUsername(username) != null) return;
+
+        UserItem businessUser = new UserItem();
+        businessUser.setUsername(username);
+        businessUser.setEmail(email);
+        businessUser.setBalance("¥0.00");
+        SettingsData settings = settingsService.getSettings();
+        businessUser.setGroup(settings.defaultGroup != null ? settings.defaultGroup : "默认组");
+        businessUser.setRole("ADMIN".equals(role) ? "管理员" : "用户");
+        businessUser.setStatus("正常");
+        businessUser.setTime(TimeSupport.today());
+        userRepository.save(businessUser);
+        LOGGER.info("已同步用户 {} 到业务表", username);
     }
 
     public AuthenticatedUser login(AuthLoginRequest request) {
@@ -141,8 +164,6 @@ public class AuthService {
 
     public String openSession(AuthenticatedUser user) {
         purgeExpiredSessions();
-        // Invalidate any existing sessions for this user (prevents session fixation)
-        sessions.entrySet().removeIf(entry -> user.getId().equals(entry.getValue().userId));
         String token = UUID.randomUUID().toString().replace("-", "");
         sessions.put(token, new SessionRecord(user.getId(), expiresAt()));
         return token;

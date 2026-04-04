@@ -70,6 +70,7 @@ export default function Pagination({
                     style={{ padding: '3px 6px', fontSize: '12px', minWidth: '55px' }}
                     value={pageSize}
                     onChange={(e) => onPageSizeChange(Number(e.target.value))}
+                    dropUp
                 >
                     {pageSizeOptions.map((s) => (
                         <option key={s} value={s}>{s}</option>

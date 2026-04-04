@@ -9,6 +9,7 @@ import {
     User as UserIcon,
 } from 'lucide-react';
 import Modal from '../components/Modal';
+import Toast from '../components/Toast';
 import StatusBadge from '../components/StatusBadge';
 import EmptyState from '../components/EmptyState';
 import Pagination from '../components/Pagination';
@@ -31,11 +32,14 @@ export default function SubscriptionsPage() {
     const [isLoading, setIsLoading] = useState(false);
     const [sortConfig, setSortConfig] = useState({ key: 'id', direction: 'asc' });
     const [filterStatus, setFilterStatus] = useState('all');
+    const [toast, setToast] = useState(null);
     const [userSearchText, setUserSearchText] = useState('');
     const [userResults, setUserResults] = useState([]);
     const [showUserDropdown, setShowUserDropdown] = useState(false);
     const [groups, setGroups] = useState([]);
+    const [plans, setPlans] = useState([]);
     const userSearchTimer = React.useRef(null);
+    const abortControllerRef = React.useRef(null);
 
     const filteredSubscriptions = subscriptions.filter((sub) => {
         return filterStatus === 'all' || sub.status === filterStatus;
@@ -66,10 +70,20 @@ export default function SubscriptionsPage() {
     };
 
     const loadData = (nextKeyword = keyword, resetPage = false) => {
+        if (abortControllerRef.current) {
+            abortControllerRef.current.abort();
+        }
+        abortControllerRef.current = new AbortController();
+
         setIsLoading(true);
-        api.get('/admin/subscriptions' + (nextKeyword ? '?keyword=' + encodeURIComponent(nextKeyword) : '')).then((data) => {
+        api.get('/admin/subscriptions' + (nextKeyword ? '?keyword=' + encodeURIComponent(nextKeyword) : ''), {
+            signal: abortControllerRef.current.signal,
+        }).then((data) => {
             applyData(data, resetPage);
-        }).catch(err => alert(err.message || '加载失败'))
+        }).catch(err => {
+            if (err.name === 'AbortError') return;
+            setToast({ message: err.message || '加载失败', type: 'error' });
+        })
         .finally(() => setTimeout(() => setIsLoading(false), 300));
     };
 
@@ -87,6 +101,12 @@ export default function SubscriptionsPage() {
         }).catch(() => {});
     };
 
+    const loadPlans = () => {
+        api.get('/admin/subscription-plans').then((data) => {
+            setPlans((data.items || []).filter(p => p.status === '正常'));
+        }).catch(() => {});
+    };
+
     const searchUsers = (text) => {
         if (!text.trim()) {
             setUserResults([]);
@@ -101,19 +121,30 @@ export default function SubscriptionsPage() {
 
     const handleUserSearchInput = (value) => {
         setUserSearchText(value);
-        setFormData({ ...formData, user: value });
+        setFormData(prev => ({ ...prev, user: value }));
         clearTimeout(userSearchTimer.current);
         userSearchTimer.current = setTimeout(() => searchUsers(value), 300);
     };
 
     const selectUser = (user) => {
-        setFormData({ ...formData, user: user.email });
-        setUserSearchText(user.email);
+        const email = user.email || '';
+        setUserSearchText(email);
+        setFormData(prev => ({ ...prev, user: email }));
         setShowUserDropdown(false);
     };
 
     useEffect(() => {
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         loadGroups();
+        // eslint-disable-next-line react-hooks/set-state-in-effect
+        loadPlans();
+        // eslint-disable-next-line react-hooks/set-state-in-effect
+        loadData('', true);
+        return () => {
+            if (abortControllerRef.current) {
+                abortControllerRef.current.abort();
+            }
+        };
     }, []);
 
     useEffect(() => {
@@ -125,6 +156,7 @@ export default function SubscriptionsPage() {
     }, [keyword]);
 
     useEffect(() => {
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         if (currentPage > totalPages) {
             setCurrentPage(totalPages);
         }
@@ -138,7 +170,14 @@ export default function SubscriptionsPage() {
 
     const handleCreate = () => {
         setEditingSub(null);
-        setFormData({ group: groups.length > 0 ? groups[0].name : '' });
+        const defaultPlanId = plans.length > 0 ? plans[0].id : '';
+        const defaultPlan = plans.length > 0 ? plans[0] : null;
+        setFormData({
+            groupId: groups.length > 0 ? groups[0].id : '',
+            planId: defaultPlanId,
+            quota: defaultPlan ? defaultPlan.monthlyQuota : '',
+            dailyLimit: defaultPlan ? (defaultPlan.dailyLimit || '') : '',
+        });
         setUserSearchText('');
         setUserResults([]);
         setShowUserDropdown(false);
@@ -148,7 +187,13 @@ export default function SubscriptionsPage() {
 
     const handleEdit = (subscription) => {
         setEditingSub(subscription);
-        setFormData({ user: subscription.user, group: subscription.group, quota: '' });
+        setFormData({
+            user: subscription.user,
+            groupId: subscription.groupId || '',
+            planId: subscription.planId || '',
+            quota: '',
+            dailyLimit: subscription.dailyLimit || '',
+        });
         setUserSearchText(subscription.user || '');
         setUserResults([]);
         setShowUserDropdown(false);
@@ -158,7 +203,7 @@ export default function SubscriptionsPage() {
 
     const handleDelete = (id) => {
         if (!window.confirm('确定要删除吗？此操作不可撤销。')) return;
-        api.del('/admin/subscriptions/' + id).then(() => loadData(keyword, true)).catch(err => alert(err.message || '操作失败'));
+        api.del('/admin/subscriptions/' + id).then(() => loadData(keyword, true)).catch(err => setToast({ message: err.message || '操作失败', type: 'error' }));
     };
 
     const handleSubmit = () => {
@@ -181,11 +226,9 @@ export default function SubscriptionsPage() {
         setKeyword(e.target.value);
     };
 
-    const startRow = total === 0 ? 0 : (currentPage - 1) * pageSize + 1;
-    const endRow = total === 0 ? 0 : Math.min(currentPage * pageSize, total);
-
     return (
         <div className="page-content">
+            {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
             <div className="controls-row">
                 <div className="controls-group" style={{ flex: 1 }}>
                     <div className="select-control" style={{ width: '320px' }}>
@@ -193,7 +236,7 @@ export default function SubscriptionsPage() {
                         <input
                             data-testid="subscriptions-search"
                             type="text"
-                            placeholder=""
+                            placeholder="搜索用户名/备注"
                             value={keyword}
                             onChange={handleSearch}
                             style={{ background: 'transparent', border: 'none', color: '#fff', outline: 'none', fontSize: '13px' }}
@@ -235,11 +278,12 @@ export default function SubscriptionsPage() {
                                 用户信息 {sortConfig.key === 'user' && (sortConfig.direction === 'asc' ? <ChevronDown size={12} style={{ transform: 'rotate(180deg)' }} /> : <ChevronDown size={12} />)}
                             </th>
                             <th onClick={() => requestSort('group')} style={{ cursor: 'pointer' }}>
-                                订阅分组 {sortConfig.key === 'group' && (sortConfig.direction === 'asc' ? <ChevronDown size={12} style={{ transform: 'rotate(180deg)' }} /> : <ChevronDown size={12} />)}
+                                订阅等级 {sortConfig.key === 'group' && (sortConfig.direction === 'asc' ? <ChevronDown size={12} style={{ transform: 'rotate(180deg)' }} /> : <ChevronDown size={12} />)}
                             </th>
                             <th onClick={() => requestSort('progress')} style={{ cursor: 'pointer' }}>
                                 使用情况 / 配额 {sortConfig.key === 'progress' && (sortConfig.direction === 'asc' ? <ChevronDown size={12} style={{ transform: 'rotate(180deg)' }} /> : <ChevronDown size={12} />)}
                             </th>
+                            <th>每日配额</th>
                             <th onClick={() => requestSort('expiry')} style={{ cursor: 'pointer' }}>
                                 到期时间 {sortConfig.key === 'expiry' && (sortConfig.direction === 'asc' ? <ChevronDown size={12} style={{ transform: 'rotate(180deg)' }} /> : <ChevronDown size={12} />)}
                             </th>
@@ -250,7 +294,7 @@ export default function SubscriptionsPage() {
                         </tr>
                     </thead>
                     <tbody>
-                        {pagedSubscriptions.length === 0 && <EmptyState colSpan={6} message={"暂无订阅数据"} />}
+                        {pagedSubscriptions.length === 0 && <EmptyState colSpan={7} message={"暂无订阅数据"} />}
                         {pagedSubscriptions.map((item) => (
                             <tr key={item.id} className="table-row-hover">
                                 <td>
@@ -286,6 +330,13 @@ export default function SubscriptionsPage() {
                                             />
                                         </div>
                                     </div>
+                                </td>
+                                <td style={{ fontSize: '13px' }}>
+                                    {item.dailyLimit ? (
+                                        <span style={{ color: 'var(--color-info)', fontWeight: 600 }}>¥{item.dailyLimit}/天</span>
+                                    ) : (
+                                        <span style={{ color: 'var(--text-muted)' }}>不限</span>
+                                    )}
                                 </td>
                                 <td style={{ color: 'var(--text-muted)', fontSize: '13px' }}>{item.expiry}</td>
                                 <td>
@@ -335,9 +386,8 @@ export default function SubscriptionsPage() {
                             <UserIcon size={16} color="var(--text-muted)" />
                             <input
                                 type="text"
-                                className="form-input"
-                                style={{ border: 'none', background: 'transparent' }}
-                                placeholder=""
+                                style={{ flex: 1, minWidth: 0, border: 'none', background: 'transparent', color: 'var(--text-primary)', outline: 'none', fontSize: '13px' }}
+                                placeholder="搜索用户"
                                 value={userSearchText}
                                 onChange={(e) => handleUserSearchInput(e.target.value)}
                                 onFocus={() => { if (userResults.length > 0) setShowUserDropdown(true); }}
@@ -376,17 +426,39 @@ export default function SubscriptionsPage() {
                         )}
                     </div>
                     <div className="form-group">
-                        <label className="form-label">订阅分组</label>
-                        <Select className="form-input" value={formData.group || ''} onChange={(event) => setFormData({ ...formData, group: event.target.value })}>
-                            {groups.length === 0 && <option value="">加载中...</option>}
-                            {groups.map((g) => (
-                                <option key={g.id} value={g.name}>{g.name}</option>
+                        <label className="form-label">订阅等级</label>
+                        <Select className="form-input" value={formData.planId || ''} onChange={(event) => {
+                            const selectedPlanId = Number(event.target.value);
+                            const selectedPlan = plans.find(p => p.id === selectedPlanId);
+                            setFormData({
+                                ...formData,
+                                planId: selectedPlanId || '',
+                                quota: selectedPlan ? selectedPlan.monthlyQuota : formData.quota,
+                                dailyLimit: selectedPlan ? (selectedPlan.dailyLimit || '') : formData.dailyLimit,
+                            });
+                        }}>
+                            <option value="">不关联等级（手动设置）</option>
+                            {plans.map(p => (
+                                <option key={p.id} value={p.id}>{p.name}（¥{p.monthlyQuota}/月）</option>
+                            ))}
+                        </Select>
+                    </div>
+                    <div className="form-group">
+                        <label className="form-label">绑定分组</label>
+                        <Select className="form-input" value={formData.groupId || ''} onChange={(event) => setFormData({ ...formData, groupId: Number(event.target.value) })}>
+                            {groups.length === 0 && <option value="">暂无可用分组</option>}
+                            {groups.map(g => (
+                                <option key={g.id} value={g.id}>{g.name}</option>
                             ))}
                         </Select>
                     </div>
                     <div className="form-group">
                         <label className="form-label">订阅配额上限（元）</label>
                         <input type="number" className="form-input" placeholder="" value={formData.quota || ''} onChange={(event) => setFormData({ ...formData, quota: event.target.value })} />
+                    </div>
+                    <div className="form-group">
+                        <label className="form-label">每日配额（元）</label>
+                        <input type="number" className="form-input" placeholder="留空表示不限制" value={formData.dailyLimit || ''} onChange={(event) => setFormData({ ...formData, dailyLimit: event.target.value })} />
                     </div>
                 </div>
             </Modal>

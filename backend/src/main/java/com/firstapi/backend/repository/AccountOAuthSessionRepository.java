@@ -16,24 +16,28 @@ public class AccountOAuthSessionRepository {
 
     private final JdbcTemplate jdbcTemplate;
 
-    private static final RowMapper<AccountOAuthSession> ROW_MAPPER = (rs, rowNum) -> new AccountOAuthSession(
-            rs.getLong("id"),
-            rs.getString("session_id"),
-            rs.getString("state_value"),
-            rs.getString("platform"),
-            rs.getString("account_type"),
-            rs.getString("auth_method"),
-            rs.getString("code_verifier"),
-            rs.getString("status_name"),
-            rs.getString("encrypted_credential"),
-            rs.getString("credential_mask"),
-            rs.getString("provider_subject"),
-            rs.getString("error_text"),
-            rs.getString("expires_at"),
-            rs.getString("exchanged_at"),
-            rs.getString("consumed_at"),
-            rs.getLong("created_by")
-    );
+    private static final RowMapper<AccountOAuthSession> ROW_MAPPER = (rs, rowNum) -> {
+        AccountOAuthSession session = new AccountOAuthSession(
+                rs.getLong("id"),
+                rs.getString("session_id"),
+                rs.getString("state_value"),
+                rs.getString("platform"),
+                rs.getString("account_type"),
+                rs.getString("auth_method"),
+                rs.getString("code_verifier"),
+                rs.getString("status_name"),
+                rs.getString("encrypted_credential"),
+                rs.getString("credential_mask"),
+                rs.getString("provider_subject"),
+                rs.getString("error_text"),
+                rs.getString("expires_at"),
+                rs.getString("exchanged_at"),
+                rs.getString("consumed_at"),
+                rs.getLong("created_by")
+        );
+        try { session.setEncryptedRefreshToken(rs.getString("encrypted_refresh_token")); } catch (Exception ignored) {}
+        return session;
+    };
 
     public AccountOAuthSessionRepository(JdbcTemplate jdbcTemplate) {
         this.jdbcTemplate = jdbcTemplate;
@@ -57,8 +61,8 @@ public class AccountOAuthSessionRepository {
         String sql = "insert into `account_oauth_sessions` " +
                 "(`session_id`, `state_value`, `platform`, `account_type`, `auth_method`, `code_verifier`, `status_name`, " +
                 "`encrypted_credential`, `credential_mask`, `provider_subject`, `error_text`, " +
-                "`expires_at`, `exchanged_at`, `consumed_at`, `created_by`) " +
-                "values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+                "`expires_at`, `exchanged_at`, `consumed_at`, `created_by`, `encrypted_refresh_token`) " +
+                "values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
         KeyHolder keyHolder = new GeneratedKeyHolder();
         jdbcTemplate.update(connection -> {
             PreparedStatement ps = connection.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS);
@@ -77,6 +81,7 @@ public class AccountOAuthSessionRepository {
             ps.setString(13, session.getExchangedAt());
             ps.setString(14, session.getConsumedAt());
             ps.setObject(15, session.getCreatedBy());
+            ps.setString(16, session.getEncryptedRefreshToken());
             return ps;
         }, keyHolder);
         Long key = GeneratedKeySupport.extractId(keyHolder);
@@ -90,7 +95,7 @@ public class AccountOAuthSessionRepository {
         jdbcTemplate.update(
                 "update `account_oauth_sessions` set `status_name` = ?, `encrypted_credential` = ?, " +
                         "`credential_mask` = ?, `provider_subject` = ?, `error_text` = ?, " +
-                        "`exchanged_at` = ?, `consumed_at` = ? where `id` = ?",
+                        "`exchanged_at` = ?, `consumed_at` = ?, `encrypted_refresh_token` = ? where `id` = ?",
                 session.getStatusName(),
                 session.getEncryptedCredential(),
                 session.getCredentialMask(),
@@ -98,6 +103,7 @@ public class AccountOAuthSessionRepository {
                 session.getErrorText(),
                 session.getExchangedAt(),
                 session.getConsumedAt(),
+                session.getEncryptedRefreshToken(),
                 session.getId()
         );
     }

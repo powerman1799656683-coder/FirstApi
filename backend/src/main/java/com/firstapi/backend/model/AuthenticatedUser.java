@@ -6,6 +6,7 @@ public class AuthenticatedUser {
     private String displayName;
     private String email;
     private String role;
+    private String balance;
     public AuthenticatedUser() {}
 
     public AuthenticatedUser(Long id, String username, String displayName, String email, String role) {
@@ -54,6 +55,14 @@ public class AuthenticatedUser {
 
     public void setRole(String role) {
         this.role = role;
+    }
+
+    public String getBalance() {
+        return balance;
+    }
+
+    public void setBalance(String balance) {
+        this.balance = balance;
     }
 
     public boolean isAdmin() {

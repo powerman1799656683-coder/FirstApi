@@ -46,4 +46,5 @@ app:
     claude-base-url: ${FIRSTAPI_RELAY_CLAUDE_BASE_URL:https://api.anthropic.com}
     anthropic-version: ${FIRSTAPI_RELAY_ANTHROPIC_VERSION:2023-06-01}
     connect-timeout-ms: ${FIRSTAPI_RELAY_CONNECT_TIMEOUT_MS:30000}
-    read-timeout-ms: ${FIRSTAPI_RELAY_READ_TIMEOUT_MS:120000}
+    read-timeout-ms: ${FIRSTAPI_RELAY_READ_TIMEOUT_MS:300000}
+    stream-read-timeout-ms: ${FIRSTAPI_RELAY_STREAM_READ_TIMEOUT_MS:300000}

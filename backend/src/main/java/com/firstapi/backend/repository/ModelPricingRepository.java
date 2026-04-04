@@ -73,8 +73,9 @@ public class ModelPricingRepository extends JdbcListRepository<ModelPricingItem>
      */
     public List<ModelPricingItem> findAllEnabledEffective() {
         String sql = "select `id`, `model_name`, `match_type`, `provider`, `input_price`, `output_price`, `currency`, `enabled`, `effective_from`, `created_at`, `updated_at` " +
-                "from `model_pricing` where `enabled` = 1 and `effective_from` <= now()";
-        return jdbcTemplate.query(sql, getRowMapper());
+                "from `model_pricing` where `enabled` = 1 and `effective_from` <= ?";
+        java.time.LocalDateTime nowCst = java.time.LocalDateTime.now(java.time.ZoneId.of("Asia/Shanghai"));
+        return jdbcTemplate.query(sql, getRowMapper(), nowCst);
     }
 
     /**

@@ -58,8 +58,8 @@ export default function RegisterPage() {
             <div className="auth-card" style={{ padding: '40px 32px 32px' }}>
                 {/* Logo + 站名整合在卡片内 */}
                 <div style={{ textAlign: 'center', marginBottom: '28px' }}>
-                    <div className="logo-icon" style={{ margin: '0 auto 14px', height: '52px', padding: '0 14px' }}>
-                        <div style={{ fontSize: '16px', fontWeight: '800', color: '#000' }}>{publicConfig?.siteName || '赔钱中转'}</div>
+                    <div className="logo-icon" style={{ margin: '0 auto 14px', width: 'auto', minWidth: 'unset', height: '52px', padding: '0 14px' }}>
+                        <div style={{ fontSize: '16px', fontWeight: '800', color: '#000', whiteSpace: 'nowrap' }}>{publicConfig?.siteName || '赔钱中转'}</div>
                     </div>
                     <p style={{ color: 'var(--text-muted)', fontSize: '13px', margin: 0 }}>创建账户</p>
                 </div>

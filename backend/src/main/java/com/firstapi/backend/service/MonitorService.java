@@ -19,7 +19,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.server.ResponseStatusException;
@@ -92,18 +91,6 @@ public class MonitorService {
     @PostConstruct
     public void init() {
         // Initial setup
-    }
-
-    @Scheduled(fixedDelay = 60000, initialDelay = 10000)
-    public void scheduledHealthCheck() {
-        try {
-            List<MonitorNodeItem> nodes = nodeRepository.findAll();
-            for (MonitorNodeItem node : nodes) {
-                checkNodeInternal(node);
-            }
-        } catch (Exception e) {
-            log.error("Health check failed", e);
-        }
     }
 
     // ==================== Main Monitor API ====================

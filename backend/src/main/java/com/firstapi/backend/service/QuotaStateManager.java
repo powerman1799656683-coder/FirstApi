@@ -41,6 +41,12 @@ public class QuotaStateManager {
         account.setQuotaLastReason(reason);
         account.setQuotaNextRetryAt(now.plusMinutes(backoffMinutes).format(QUOTA_TIME_FORMAT));
         account.setQuotaUpdatedAt(now.format(QUOTA_TIME_FORMAT));
+        // OAuth token 过期且刷新失败 → 直接关闭调度，避免无效请求
+        if ("oauth_token_expired".equals(reason)) {
+            account.setTempDisabled(true);
+            account.setStatus("error");
+            LOGGER.warn("Account {} OAuth token expired and refresh failed, scheduling disabled", accountId);
+        }
         accountRepository.update(accountId, account);
         LOGGER.warn("Account {} enters quota cooldown, reason={}, retryIn={}m", accountId, reason, backoffMinutes);
     }

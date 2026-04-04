@@ -8,21 +8,29 @@ import com.firstapi.backend.repository.UserRepository;
 import com.firstapi.backend.util.PasswordHashSupport;
 import com.firstapi.backend.util.TimeSupport;
 import com.firstapi.backend.util.ValidationSupport;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.List;
 import java.util.stream.Collectors;
 
 @Service
 public class UserService {
 
+    private static final Logger LOGGER = LoggerFactory.getLogger(UserService.class);
+    /** 余额保留 10 位小数，与 CostCalculationService 一致 */
+    private static final int BALANCE_SCALE = 10;
+
     private final UserRepository repository;
     private final AuthUserRepository authUserRepository;
     private final SettingsService settingsService;
 
-    public UserService(UserRepository repository, 
+    public UserService(UserRepository repository,
                        AuthUserRepository authUserRepository,
                        SettingsService settingsService) {
         this.repository = repository;
@@ -54,6 +62,10 @@ public class UserService {
         String username = ValidationSupport.requireNotBlank(req.getUsername(), "用户名不能为空");
         String password = ValidationSupport.requireNotBlank(req.getPassword(), "密码不能为空");
 
+        if (password.length() < 10) {
+            throw new IllegalArgumentException("密码长度不能少于10位");
+        }
+
         String email = req.getEmail();
         if (!isBlank(email) && !email.matches("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$")) {
             throw new IllegalArgumentException("邮箱格式无效");
@@ -63,13 +75,13 @@ public class UserService {
             throw new IllegalArgumentException("该用户名已被注册");
         }
 
-        // Format balance from numeric input
-        String balance = "¥0.00";
+        // 初始余额
+        String balance = formatBalance(BigDecimal.ZERO);
         if (!isBlank(req.getBalance())) {
             try {
-                double val = Double.parseDouble(req.getBalance().replaceAll("[^\\d.\\-]", ""));
-                balance = String.format("$%.2f", val);
-            } catch (NumberFormatException ignored) {}
+                BigDecimal val = parseBalance(req.getBalance());
+                balance = formatBalance(val);
+            } catch (Exception ignored) {}
         }
 
         UserItem item = new UserItem();
@@ -81,8 +93,8 @@ public class UserService {
         item.setRole(emptyAsDefault(req.getRole(), "用户"));
         item.setStatus(emptyAsDefault(req.getStatus(), "正常"));
         item.setTime(emptyAsDefault(req.getTime(), TimeSupport.today()));
-        UserItem saved = repository.save(item);
-
+        // 先创建 auth_users 记录（含密码哈希），再保存 users 记录，
+        // 避免 auth_users 创建失败时 users 表出现孤立记录
         AuthUser authUser = new AuthUser();
         authUser.setUsername(username);
         authUser.setEmail(isBlank(email) ? "" : email);
@@ -92,6 +104,7 @@ public class UserService {
         authUser.setEnabled(true);
         authUserRepository.save(authUser);
 
+        UserItem saved = repository.save(item);
         return saved;
     }
 
@@ -117,7 +130,18 @@ public class UserService {
 
         // Sync auth_users: update password if provided, update email/role
         AuthUser authUser = authUserRepository.findByUsername(existing.getUsername());
-        if (authUser != null) {
+        if (authUser == null && !isBlank(req.getPassword())) {
+            // 旧数据迁移：users 表有记录但 auth_users 没有，补充创建 auth_users 记录
+            AuthUser newAuthUser = new AuthUser();
+            newAuthUser.setUsername(existing.getUsername());
+            newAuthUser.setEmail(isBlank(existing.getEmail()) ? "" : existing.getEmail());
+            newAuthUser.setDisplayName(existing.getUsername());
+            newAuthUser.setPasswordHash(PasswordHashSupport.hash(req.getPassword()));
+            newAuthUser.setRole(mapRole(existing.getRole()));
+            newAuthUser.setEnabled(true);
+            authUserRepository.save(newAuthUser);
+            LOGGER.info("已为旧用户 {} 补充创建 auth_users 记录", existing.getUsername());
+        } else if (authUser != null) {
             if (!isBlank(req.getPassword())) {
                 authUserRepository.updatePasswordHash(authUser.getId(), PasswordHashSupport.hash(req.getPassword()));
             }
@@ -127,27 +151,88 @@ public class UserService {
         return updated;
     }
 
+    /**
+     * 管理员手动充值/退款。amount 为正数表示充值，负数表示退款。
+     */
     public UserItem adjustBalance(Long id, double amount) {
         UserItem existing = repository.findById(id);
         if (existing == null) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "用户不存在");
         }
-        double current = parseBalance(existing.getBalance());
-        double updated = current + amount;
-        if (updated < 0) {
+        BigDecimal current = parseBalance(existing.getBalance());
+        BigDecimal updated = current.add(BigDecimal.valueOf(amount)).setScale(BALANCE_SCALE, RoundingMode.HALF_UP);
+        if (updated.compareTo(BigDecimal.ZERO) < 0) {
             throw new IllegalArgumentException("余额不足，当前余额: " + existing.getBalance());
         }
-        existing.setBalance(String.format("$%.2f", updated));
+        existing.setBalance(formatBalance(updated));
         return repository.update(id, existing);
     }
 
-    private double parseBalance(String balanceStr) {
-        if (balanceStr == null || balanceStr.isEmpty()) return 0;
+    /**
+     * 通过 auth_users.id (即 api_keys.owner_id) 查找对应的 users 记录并扣减余额。
+     * 全程使用 BigDecimal，保留 10 位小数精度，不做 double 转换。
+     * 扣费失败抛异常，由调用方决定处理方式。
+     */
+    public synchronized void deductByAuthUserId(Long authUserId, BigDecimal cost) {
+        if (cost == null || cost.compareTo(BigDecimal.ZERO) <= 0) return;
+        UserItem user = resolveUserByAuthId(authUserId);
+        if (user == null) {
+            LOGGER.warn("扣费时找不到用户记录: authUserId={}", authUserId);
+            return;
+        }
+        BigDecimal current = parseBalance(user.getBalance());
+        BigDecimal updated = current.subtract(cost).setScale(BALANCE_SCALE, RoundingMode.HALF_UP);
+        user.setBalance(formatBalance(updated));
+        repository.update(user.getId(), user);
+    }
+
+    /**
+     * 检查用户余额是否 > 0（通过 auth_users.id 查找）。
+     * 找不到用户记录时返回 false（拒绝请求，避免逃费）。
+     */
+    public boolean checkBalanceByAuthUserId(Long authUserId) {
+        UserItem user = resolveUserByAuthId(authUserId);
+        if (user == null) return false;
+        return parseBalance(user.getBalance()).compareTo(BigDecimal.ZERO) > 0;
+    }
+
+    private UserItem resolveUserByAuthId(Long authUserId) {
+        AuthUser authUser = authUserRepository.findById(authUserId);
+        if (authUser == null) return null;
+        return repository.findByUsername(authUser.getUsername());
+    }
+
+    /**
+     * 解析余额字符串为 BigDecimal。
+     * 支持 "¥123.45"、"$123.45"、"123.45" 等格式。
+     */
+    private BigDecimal parseBalance(String balanceStr) {
+        if (balanceStr == null || balanceStr.isEmpty()) return BigDecimal.ZERO;
         String cleaned = balanceStr.replaceAll("[^\\d.\\-]", "");
         try {
-            return Double.parseDouble(cleaned);
+            return new BigDecimal(cleaned);
         } catch (NumberFormatException e) {
-            return 0;
+            return BigDecimal.ZERO;
+        }
+    }
+
+    /**
+     * 格式化余额为统一的人民币格式：¥xxx.xxxxxxxxxx（10 位小数）。
+     */
+    private String formatBalance(BigDecimal value) {
+        return "¥" + value.setScale(BALANCE_SCALE, RoundingMode.HALF_UP).toPlainString();
+    }
+
+    /**
+     * 登录成功后更新用户的登录 IP 和位置信息。
+     */
+    public void updateLoginInfo(String username, String ip, String location) {
+        UserItem user = repository.findByUsername(username);
+        if (user != null) {
+            user.setLoginIp(ip != null ? ip : "");
+            user.setLoginLocation(location != null ? location : "");
+            user.setTime(com.firstapi.backend.util.TimeSupport.today());
+            repository.update(user.getId(), user);
         }
     }
 

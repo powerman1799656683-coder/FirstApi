@@ -381,9 +381,9 @@ export default function MonitorSystem() {
 
             <ErrorBoundary fallbackTitle="指标卡异常" fallbackMessage="系统指标区域遇到渲染错误，其余页面不受影响。">
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 20, marginBottom: 24 }}>
-                <StatCard title="CPU 负载" icon={Cpu} value={data.cpu.value} detail={data.cpu.detail} color={data.cpu.color}>
+                <StatCard title="CPU 负载" icon={Cpu} value={data.cpu?.value} detail={data.cpu?.detail} color={data.cpu?.color}>
                     <ResponsiveContainer width="100%" height="100%">
-                        <AreaChart data={data.network?.history || []}>
+                        <AreaChart data={data.cpu?.history || []}>
                             <defs>
                                 <linearGradient id="cpuGrad" x1="0" y1="0" x2="0" y2="1">
                                     <stop offset="0%" stopColor="var(--primary-tech)" stopOpacity={0.3} />
@@ -395,25 +395,25 @@ export default function MonitorSystem() {
                     </ResponsiveContainer>
                 </StatCard>
 
-                <StatCard title="物理内存" icon={Activity} value={data.memory.value} detail={data.memory.detail} color={data.memory.color}>
+                <StatCard title="物理内存" icon={Activity} value={data.memory?.value} detail={data.memory?.detail} color={data.memory?.color}>
                     <ResponsiveContainer width="100%" height="100%">
-                        <AreaChart data={data.memory.history}>
+                        <AreaChart data={data.memory?.history || []}>
                             <Area type="monotone" dataKey="value" stroke="#10b981" fill="rgba(16, 185, 129, 0.1)" />
                         </AreaChart>
                     </ResponsiveContainer>
                 </StatCard>
 
-                <StatCard title="JVM 堆大小" icon={HardDrive} value={data.jvm.value} detail={data.jvm.detail} color={data.jvm.color}>
+                <StatCard title="JVM 堆大小" icon={HardDrive} value={data.jvm?.value} detail={data.jvm?.detail} color={data.jvm?.color}>
                     <ResponsiveContainer width="100%" height="100%">
-                        <AreaChart data={data.jvm.history}>
+                        <AreaChart data={data.jvm?.history || []}>
                             <Area type="monotone" dataKey="value" stroke="#1d4ed8" fill="rgba(29, 78, 216, 0.1)" />
                         </AreaChart>
                     </ResponsiveContainer>
                 </StatCard>
 
-                <StatCard title="数据库连接" icon={Database} value={data.database.value} detail={data.database.detail} color={data.database.color}>
+                <StatCard title="数据库连接" icon={Database} value={data.database?.value} detail={data.database?.detail} color={data.database?.color}>
                     <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={data.database.history}>
+                        <BarChart data={data.database?.history || []}>
                             <Bar dataKey="value" fill="#3b82f6" radius={[4, 4, 0, 0]} />
                         </BarChart>
                     </ResponsiveContainer>
@@ -427,7 +427,7 @@ export default function MonitorSystem() {
                 <div className="mon-chart-card">
                     <div className="mon-chart-header">
                         <h4>网络流量 (实时)</h4>
-                        <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{data.network.value} 当前带宽</span>
+                        <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{data.network?.value || '-'} 当前带宽</span>
                     </div>
                     <div style={{ height: 260 }}>
                          <ResponsiveContainer width="100%" height="100%">

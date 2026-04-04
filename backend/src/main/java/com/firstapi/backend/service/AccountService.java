@@ -15,6 +15,8 @@ import com.firstapi.backend.repository.IpRepository;
 import com.firstapi.backend.repository.RelayRecordRepository;
 import com.firstapi.backend.util.TimeSupport;
 import com.firstapi.backend.util.ValidationSupport;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
@@ -44,6 +46,7 @@ import java.util.stream.Collectors;
 @Service
 public class AccountService {
 
+    private static final Logger log = LoggerFactory.getLogger(AccountService.class);
     private static final ZoneId ZONE = ZoneId.of("Asia/Shanghai");
     private static final DateTimeFormatter RELAY_TIME_FORMAT = DateTimeFormatter.ofPattern("yyyy/MM/dd HH:mm:ss");
     private static final DateTimeFormatter RELAY_TIME_MINUTE_FORMAT = DateTimeFormatter.ofPattern("yyyy/MM/dd HH:mm");
@@ -70,6 +73,9 @@ public class AccountService {
     private final RelayProperties relayProperties;
     private final AccountOAuthService accountOAuthService;
     private final RelayAccountSelector relayAccountSelector;
+    private final ClaudeRelayAdapter claudeRelayAdapter;
+    private final OpenAiRelayAdapter openAiRelayAdapter;
+    private final OAuthTokenRefreshService oauthTokenRefreshService;
 
     public AccountService(AccountRepository repository,
                           SensitiveDataService sensitiveDataService,
@@ -80,7 +86,10 @@ public class AccountService {
                           UpstreamHttpClient upstreamHttpClient,
                           RelayProperties relayProperties,
                           AccountOAuthService accountOAuthService,
-                          RelayAccountSelector relayAccountSelector) {
+                          RelayAccountSelector relayAccountSelector,
+                          ClaudeRelayAdapter claudeRelayAdapter,
+                          OpenAiRelayAdapter openAiRelayAdapter,
+                          OAuthTokenRefreshService oauthTokenRefreshService) {
         this.repository = repository;
         this.sensitiveDataService = sensitiveDataService;
         this.ipRepository = ipRepository;
@@ -91,6 +100,9 @@ public class AccountService {
         this.relayProperties = relayProperties;
         this.accountOAuthService = accountOAuthService;
         this.relayAccountSelector = relayAccountSelector;
+        this.claudeRelayAdapter = claudeRelayAdapter;
+        this.openAiRelayAdapter = openAiRelayAdapter;
+        this.oauthTokenRefreshService = oauthTokenRefreshService;
     }
 
     public PageResponse<AccountItem> list(String keyword) {
@@ -313,6 +325,10 @@ public class AccountService {
 
         if (req.getTempDisabled() != null) {
             existing.setTempDisabled(req.getTempDisabled());
+            // 启用调度时，同时恢复状态为正常
+            if (!req.getTempDisabled()) {
+                existing.setStatus("正常");
+            }
         }
         if (req.getQuotaExhausted() != null) {
             existing.setQuotaExhausted(req.getQuotaExhausted());
@@ -408,41 +424,88 @@ public class AccountService {
         int nextErrors = previousErrors + 1;
         String nextStatus = "error";
         try {
-            String provider = normalizePlatform(existing.getPlatform());
-            String baseUrl = resolveProbeBaseUrl(existing, provider);
             String credential = sensitiveDataService.reveal(existing.getCredential());
             if (ValidationSupport.isBlank(credential)) {
                 throw new IllegalArgumentException("Empty credential");
             }
 
-            Map<String, String> headers = new HashMap<>();
+            // 直接复用中转 Adapter 的真实请求构建逻辑，确保与正常用户请求完全一致
             IpItem proxy = resolveTestProxy(existing);
+            String provider = normalizePlatform(existing.getPlatform());
             RelayResult probe;
             if ("anthropic".equals(provider)) {
-                if ("OAuth".equalsIgnoreCase(existing.getAuthMethod())) {
-                    headers.put("Authorization", "Bearer " + credential);
-                    headers.put("anthropic-beta", relayProperties.getOauthBetaHeader());
-                } else {
-                    headers.put("x-api-key", credential);
-                }
-                headers.put("anthropic-version", relayProperties.getAnthropicVersion());
+                probe = claudeRelayAdapter.probeAccount(existing, proxy);
+            } else if ("openai".equals(provider)) {
+                probe = openAiRelayAdapter.probeAccount(existing, proxy);
+            } else {
+                // 其他平台：通用 chat/completions 探针
+                Map<String, String> headers = new HashMap<>();
+                headers.put("Authorization", "Bearer " + credential);
+                String baseUrl = resolveProbeBaseUrl(existing, provider);
                 probe = upstreamHttpClient.postJson(
-                        baseUrl + "/v1/messages",
+                        baseUrl + "/v1/chat/completions",
                         headers,
-                        buildClaudeProbePayload(),
+                        buildOpenAiProbePayload(),
                         proxy,
                         relayProperties.getReadTimeoutMs()
                 );
-            } else {
-                headers.put("Authorization", "Bearer " + credential);
-                probe = upstreamHttpClient.get(baseUrl + "/v1/models", headers, proxy);
             }
+
+            log.info("Account {} [{}|{}] probe HTTP {}, body snippet: {}",
+                    existing.getId(), existing.getPlatform(), existing.getAuthMethod(),
+                    probe.getStatusCode(), truncate(probe.getBody(), 200));
 
             if (probe.getStatusCode() >= 200 && probe.getStatusCode() < 300) {
                 nextStatus = "normal";
                 nextErrors = 0;
+                // 测试成功：解除暂停状态，清空额度冷却标记
+                existing.setTempDisabled(false);
+                existing.setQuotaExhausted(false);
+            } else if (isFatalError(probe.getStatusCode(), probe.getBody(), existing.getAuthMethod())) {
+                nextStatus = "error";
+                existing.setTempDisabled(true);
+                log.warn("Account {} fatal error on test, auto-suspended. HTTP {}", existing.getId(), probe.getStatusCode());
+            } else if (probe.getStatusCode() == 401 && "OAuth".equalsIgnoreCase(existing.getAuthMethod())) {
+                // OAuth 401 且无永久封禁信号 → 尝试刷新 token
+                boolean refreshed = oauthTokenRefreshService.tryRefreshNow(existing.getId());
+                if (refreshed) {
+                    log.info("Account {} OAuth token refreshed during test, retrying probe", existing.getId());
+                    // 刷新成功后重新探测一次
+                    RelayResult retryProbe;
+                    if ("anthropic".equals(provider)) {
+                        retryProbe = claudeRelayAdapter.probeAccount(existing, proxy);
+                    } else if ("openai".equals(provider)) {
+                        retryProbe = openAiRelayAdapter.probeAccount(existing, proxy);
+                    } else {
+                        Map<String, String> retryHeaders = new HashMap<>();
+                        retryHeaders.put("Authorization", "Bearer " + sensitiveDataService.reveal(existing.getCredential()));
+                        String retryBaseUrl = resolveProbeBaseUrl(existing, provider);
+                        retryProbe = upstreamHttpClient.postJson(
+                                retryBaseUrl + "/v1/chat/completions", retryHeaders,
+                                buildOpenAiProbePayload(), proxy, relayProperties.getReadTimeoutMs());
+                    }
+                    if (retryProbe.getStatusCode() >= 200 && retryProbe.getStatusCode() < 300) {
+                        nextStatus = "normal";
+                        nextErrors = 0;
+                        existing.setTempDisabled(false);
+                        existing.setQuotaExhausted(false);
+                        log.info("Account {} test passed after OAuth refresh", existing.getId());
+                    } else {
+                        nextStatus = "error";
+                        existing.setTempDisabled(true);
+                        log.warn("Account {} still 401 after OAuth refresh, auto-suspended", existing.getId());
+                    }
+                } else {
+                    // 刷新失败（无 refresh_token 或 token 被吊销）→ 暂停调度
+                    nextStatus = "error";
+                    existing.setTempDisabled(true);
+                    log.warn("Account {} OAuth 401 and refresh failed, auto-suspended. HTTP {}", existing.getId(), probe.getStatusCode());
+                }
+            } else {
+                log.warn("Account {} test failed (non-fatal). HTTP {}", existing.getId(), probe.getStatusCode());
             }
-        } catch (Exception ignored) {
+        } catch (Exception e) {
+            log.error("Account {} test threw exception: {}", existing.getId(), e.getMessage(), e);
             nextStatus = "error";
         }
 
@@ -455,9 +518,60 @@ public class AccountService {
         return updated;
     }
 
-    private JsonNode buildClaudeProbePayload() {
+    /**
+     * 判断是否为致命错误（账号无会员/被封/凭据失效），触发自动停止调度。
+     * 401 → 凭据失效/账号被封
+     * 403 → 无订阅/无权限（排除 429 限速和 5xx 服务端问题）
+     * 响应体中包含特定错误类型关键字时也视为致命错误。
+     */
+    private boolean isFatalError(int statusCode, String body, String authMethod) {
+        boolean isOAuth = "OAuth".equalsIgnoreCase(authMethod);
+
+        // 先解析响应体，无论状态码如何，永久封禁/凭据失效信号优先于 OAuth 宽容逻辑
+        if (body != null && !body.isEmpty()) {
+            try {
+                JsonNode root = OBJECT_MAPPER.readTree(body);
+
+                // Anthropic 风格 error.type
+                String type = root.path("error").path("type").asText("");
+                if ("authentication_error".equals(type) || "permission_error".equals(type)
+                        || "invalid_api_key".equals(type)) {
+                    return true;
+                }
+
+                // OpenAI 风格 error.code
+                String code = root.path("error").path("code").asText("");
+                if ("invalid_api_key".equals(code) || "account_deactivated".equals(code)) {
+                    return true; // 封号/Key 失效，OAuth 也是致命的
+                }
+                if ("insufficient_quota".equals(code) && statusCode == 403) {
+                    return true;
+                }
+
+                // OpenAI 封号消息关键词兜底（401 返回时 code 字段有时为空，靠 message 判断）
+                String message = root.path("error").path("message").asText("");
+                if (message.contains("deactivated") || message.contains("suspended")
+                        || message.contains("banned")) {
+                    return true;
+                }
+            } catch (Exception ignored) {
+            }
+        }
+
+        if (statusCode == 401) {
+            // OAuth 401 且 body 无永久封禁信号 → 可能只是 token 过期，不视为致命
+            return !isOAuth;
+        }
+        if (statusCode == 403) {
+            return true;
+        }
+        return false;
+    }
+
+    /** 其他平台（非 anthropic/openai）通用探针 payload */
+    private JsonNode buildOpenAiProbePayload() {
         ObjectNode root = OBJECT_MAPPER.createObjectNode();
-        root.put("model", relayProperties.getProbeClaudeModel());
+        root.put("model", "gpt-4o-mini");
         root.put("max_tokens", 1);
         ArrayNode messages = root.putArray("messages");
         ObjectNode message = messages.addObject();
@@ -644,10 +758,12 @@ public class AccountService {
 
     private void resolveCredential(AccountItem item, AccountItem.Request req) {
         if (!isBlank(req.getCredentialRef())) {
-            // Use OAuth credential reference
-            String encrypted = accountOAuthService.consumeCredentialRef(req.getCredentialRef());
-            if (encrypted != null) {
-                item.setCredential(encrypted);
+            // Use OAuth credential reference — also picks up refresh_token and token expiry
+            AccountOAuthService.OAuthCredentialBundle bundle = accountOAuthService.consumeCredentialBundle(req.getCredentialRef());
+            if (bundle != null) {
+                item.setCredential(bundle.getEncryptedCredential());
+                item.setEncryptedRefreshToken(bundle.getEncryptedRefreshToken());
+                item.setOauthTokenExpiresAt(bundle.getExpiresAt());
             }
         } else if (!ValidationSupport.isBlank(req.getCredential())) {
             item.setCredential(sensitiveDataService.protect(req.getCredential().trim()));
@@ -656,9 +772,11 @@ public class AccountService {
 
     private void resolveCredentialForUpdate(AccountItem existing, AccountItem.Request req) {
         if (!isBlank(req.getCredentialRef())) {
-            String encrypted = accountOAuthService.consumeCredentialRef(req.getCredentialRef());
-            if (encrypted != null) {
-                existing.setCredential(encrypted);
+            AccountOAuthService.OAuthCredentialBundle bundle = accountOAuthService.consumeCredentialBundle(req.getCredentialRef());
+            if (bundle != null) {
+                existing.setCredential(bundle.getEncryptedCredential());
+                existing.setEncryptedRefreshToken(bundle.getEncryptedRefreshToken());
+                existing.setOauthTokenExpiresAt(bundle.getExpiresAt());
             }
         } else if (!ValidationSupport.isBlank(req.getCredential())) {
             existing.setCredential(sensitiveDataService.protect(req.getCredential().trim()));
@@ -991,6 +1109,10 @@ public class AccountService {
         if (isDisabledStatus(status)) {
             return "异常";
         }
+        // 数据库中可能存的是英文 "normal"，统一返回中文
+        if ("normal".equalsIgnoreCase(status)) {
+            return "正常";
+        }
         return status;
     }
 
@@ -1299,6 +1421,11 @@ public class AccountService {
 
     private boolean isBlank(String s) {
         return s == null || s.trim().isEmpty();
+    }
+
+    private static String truncate(String s, int max) {
+        if (s == null) return "(null)";
+        return s.length() <= max ? s : s.substring(0, max) + "...";
     }
 
     private boolean contains(String value, String keyword) {

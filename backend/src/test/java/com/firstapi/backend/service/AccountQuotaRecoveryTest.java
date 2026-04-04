@@ -58,7 +58,10 @@ class AccountQuotaRecoveryTest {
                 upstreamHttpClient,
                 relayProperties,
                 accountOAuthService,
-                relayAccountSelector
+                relayAccountSelector,
+                null,
+                null,
+                null
         );
         when(accountGroupBindingRepository.findAllGroupings()).thenReturn(java.util.Map.of());
     }

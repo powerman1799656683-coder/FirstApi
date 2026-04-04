@@ -9,7 +9,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -178,8 +177,15 @@ public class AccountOAuthService {
             session.setEncryptedCredential(encryptedCredential);
             session.setCredentialMask(credentialMask);
             session.setProviderSubject(exchangePayload.providerSubject);
+            if (!isBlank(exchangePayload.refreshToken)) {
+                session.setEncryptedRefreshToken(sensitiveDataService.protect(exchangePayload.refreshToken));
+            }
             session.setStatusName("EXCHANGED");
             session.setExchangedAt(LocalDateTime.now(ZONE).format(DT_FORMAT));
+            // Overwrite session expiry with the actual token expiry (session is now EXCHANGED, original expiry is irrelevant)
+            if (!isBlank(exchangePayload.expiresAt)) {
+                session.setExpiresAt(exchangePayload.expiresAt);
+            }
             oauthSessionRepository.update(session);
 
             Map<String, Object> result = new LinkedHashMap<>();
@@ -224,9 +230,46 @@ public class AccountOAuthService {
         return encrypted;
     }
 
-    @Scheduled(fixedDelayString = "${FIRSTAPI_OAUTH_SESSION_CLEANUP_DELAY_MS:300000}")
-    public void cleanupExpiredSessions() {
-        oauthSessionRepository.deleteExpired();
+    /**
+     * Consume credential ref and return full OAuth credential bundle including refresh token.
+     */
+    public OAuthCredentialBundle consumeCredentialBundle(String credentialRef) {
+        if (credentialRef == null || credentialRef.trim().isEmpty()) {
+            return null;
+        }
+        Long currentUserId = CurrentSessionHolder.require().getId();
+        AccountOAuthSession session = oauthSessionRepository.findBySessionId(credentialRef);
+        if (session == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "credentialRef is invalid");
+        }
+        if (!Objects.equals(session.getCreatedBy(), currentUserId)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "credentialRef does not belong to current user");
+        }
+        if (!"EXCHANGED".equals(session.getStatusName())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "OAuth session has not been exchanged or is already consumed");
+        }
+        OAuthCredentialBundle bundle = new OAuthCredentialBundle();
+        bundle.encryptedCredential = session.getEncryptedCredential();
+        bundle.encryptedRefreshToken = session.getEncryptedRefreshToken();
+        bundle.expiresAt = session.getExpiresAt();
+        // Resolve actual token expiry from exchanged_at + the original response
+        // The session.expiresAt is the session expiry (10 min), not the token expiry.
+        // We stored the token expiry info during exchange in the result map, but need to
+        // recover it here. For now, use exchangedAt as base reference.
+        session.setStatusName("CONSUMED");
+        session.setConsumedAt(LocalDateTime.now(ZONE).format(DT_FORMAT));
+        oauthSessionRepository.update(session);
+        return bundle;
+    }
+
+    public static final class OAuthCredentialBundle {
+        private String encryptedCredential;
+        private String encryptedRefreshToken;
+        private String expiresAt;
+
+        public String getEncryptedCredential() { return encryptedCredential; }
+        public String getEncryptedRefreshToken() { return encryptedRefreshToken; }
+        public String getExpiresAt() { return expiresAt; }
     }
 
     private OAuthExchangePayload exchangeCodeForCredential(String platform, String state, String code, String codeVerifier) {
@@ -325,6 +368,10 @@ public class AccountOAuthService {
                     "organization_id",
                     "org_id");
             exchangePayload.expiresAt = resolveExpiresAt(payload);
+            exchangePayload.refreshToken = firstNonBlank(payload, "refresh_token");
+            if (!isBlank(exchangePayload.refreshToken)) {
+                log.info("Anthropic OAuth refresh_token received (length={})", exchangePayload.refreshToken.length());
+            }
             return exchangePayload;
         } catch (ResponseStatusException ex) {
             throw ex;
@@ -404,6 +451,7 @@ public class AccountOAuthService {
                     "organization_id",
                     "org_id");
             exchangePayload.expiresAt = resolveExpiresAt(payload);
+            exchangePayload.refreshToken = firstNonBlank(payload, "refresh_token");
             return exchangePayload;
         } catch (ResponseStatusException ex) {
             throw ex;
@@ -695,5 +743,6 @@ public class AccountOAuthService {
         private String credential;
         private String providerSubject;
         private String expiresAt;
+        private String refreshToken;
     }
 }

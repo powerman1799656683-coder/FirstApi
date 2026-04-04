@@ -105,6 +105,84 @@ class RelayControllerTest {
     }
 
     @Test
+    void relaysOpenAiToolCallingPayloadsAndResponses() throws Exception {
+        OPENAI_SERVER.enqueue(new MockResponse()
+                .setResponseCode(200)
+                .addHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
+                .setBody("""
+                        {"id":"chatcmpl-tool","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":null,"tool_calls":[{"id":"call_read_file","type":"function","function":{"name":"read_file","arguments":"{\\"path\\":\\"README.md\\"}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":12,"completion_tokens":6,"total_tokens":18}}
+                        """));
+
+        String key = saveApiKey("sk-firstapi-openai-tools", "openai-default");
+
+        mockMvc.perform(post("/v1/chat/completions")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + key)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "model": "gpt-4o-mini",
+                                  "tool_choice": "auto",
+                                  "tools": [
+                                    {
+                                      "type": "function",
+                                      "function": {
+                                        "name": "read_file",
+                                        "description": "Read a file from disk",
+                                        "parameters": {
+                                          "type": "object",
+                                          "properties": {
+                                            "path": {
+                                              "type": "string"
+                                            }
+                                          },
+                                          "required": ["path"]
+                                        }
+                                      }
+                                    }
+                                  ],
+                                  "messages": [
+                                    {
+                                      "role": "user",
+                                      "content": "Read the README"
+                                    },
+                                    {
+                                      "role": "assistant",
+                                      "content": null,
+                                      "tool_calls": [
+                                        {
+                                          "id": "call_list_files",
+                                          "type": "function",
+                                          "function": {
+                                            "name": "list_files",
+                                            "arguments": "{}"
+                                          }
+                                        }
+                                      ]
+                                    },
+                                    {
+                                      "role": "tool",
+                                      "tool_call_id": "call_list_files",
+                                      "content": "[\\"README.md\\", \\"pom.xml\\"]"
+                                    }
+                                  ]
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.choices[0].finish_reason").value("tool_calls"))
+                .andExpect(jsonPath("$.choices[0].message.tool_calls[0].id").value("call_read_file"))
+                .andExpect(jsonPath("$.choices[0].message.tool_calls[0].function.name").value("read_file"));
+
+        RecordedRequest request = OPENAI_SERVER.takeRequest(1, TimeUnit.SECONDS);
+        assertThat(request).isNotNull();
+        assertThat(request.getPath()).isEqualTo("/v1/chat/completions");
+        String upstreamBody = request.getBody().readUtf8();
+        assertThat(upstreamBody).contains("\"tools\"");
+        assertThat(upstreamBody).contains("\"tool_choice\":\"auto\"");
+        assertThat(upstreamBody).contains("\"tool_calls\"");
+        assertThat(upstreamBody).contains("\"tool_call_id\":\"call_list_files\"");
+    }
+
+    @Test
     void usesAccountSpecificOpenAiBaseUrlWhenPresent() throws Exception {
         OPENAI_SERVER.enqueue(new MockResponse()
                 .setResponseCode(200)
@@ -156,6 +234,71 @@ class RelayControllerTest {
         String body = result.getResponse().getContentAsString();
         assertThat(body).contains("data: {\"id\":\"chatcmpl-stream\"");
         assertThat(body).contains("data: [DONE]");
+    }
+
+    @Test
+    void relaysOpenAiStreamingToolCallChunks() throws Exception {
+        OPENAI_SERVER.enqueue(new MockResponse()
+                .setResponseCode(200)
+                .addHeader(HttpHeaders.CONTENT_TYPE, MediaType.TEXT_EVENT_STREAM_VALUE)
+                .setBody("""
+                        data: {"id":"chatcmpl-stream-tools","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"call_stream","type":"function","function":{"name":"read_file","arguments":"{\\"path\\":\\"README.md\\"}"}}]},"finish_reason":null}]}
+
+                        data: {"id":"chatcmpl-stream-tools","object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}
+
+                        data: [DONE]
+
+                        """));
+
+        String key = saveApiKey("sk-firstapi-openai-tools-stream", "openai-default");
+
+        MvcResult result = mockMvc.perform(post("/v1/chat/completions")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + key)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "model": "gpt-4o-mini",
+                                  "stream": true,
+                                  "tool_choice": "auto",
+                                  "tools": [
+                                    {
+                                      "type": "function",
+                                      "function": {
+                                        "name": "read_file",
+                                        "description": "Read a file from disk",
+                                        "parameters": {
+                                          "type": "object",
+                                          "properties": {
+                                            "path": {
+                                              "type": "string"
+                                            }
+                                          },
+                                          "required": ["path"]
+                                        }
+                                      }
+                                    }
+                                  ],
+                                  "messages": [
+                                    {
+                                      "role": "user",
+                                      "content": "Read the README"
+                                    }
+                                  ]
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(header().string(HttpHeaders.CONTENT_TYPE, startsWith(MediaType.TEXT_EVENT_STREAM_VALUE)))
+                .andReturn();
+
+        String body = result.getResponse().getContentAsString();
+        assertThat(body).contains("\"tool_calls\"");
+        assertThat(body).contains("\"finish_reason\":\"tool_calls\"");
+        assertThat(body).contains("data: [DONE]");
+
+        RecordedRequest request = OPENAI_SERVER.takeRequest(1, TimeUnit.SECONDS);
+        assertThat(request).isNotNull();
+        assertThat(request.getPath()).isEqualTo("/v1/chat/completions");
+        assertThat(request.getBody().readUtf8()).contains("\"tools\"");
     }
 
     @Test
@@ -216,6 +359,36 @@ class RelayControllerTest {
     }
 
     @Test
+    void convertsSseStyleResponsesApiBodyIntoJsonForNonStreamRequests() throws Exception {
+        OPENAI_SERVER.enqueue(new MockResponse()
+                .setResponseCode(200)
+                .addHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
+                .setBody("event: response.created\n"
+                        + "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_test\",\"object\":\"response\",\"status\":\"in_progress\"}}\n\n"
+                        + "event: response.output_item.done\n"
+                        + "data: {\"type\":\"response.output_item.done\",\"item\":{\"id\":\"msg_test\",\"type\":\"message\",\"status\":\"completed\",\"content\":[{\"type\":\"output_text\",\"text\":\"pong\"}],\"role\":\"assistant\"},\"output_index\":0}\n\n"
+                        + "event: response.completed\n"
+                        + "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_test\",\"object\":\"response\",\"status\":\"completed\",\"model\":\"gpt-5.4\",\"output\":[{\"id\":\"msg_test\",\"type\":\"message\",\"status\":\"completed\",\"content\":[{\"type\":\"output_text\",\"text\":\"pong\"}],\"role\":\"assistant\"}],\"usage\":{\"input_tokens\":11,\"output_tokens\":7,\"total_tokens\":18}}}\n\n"));
+
+        String key = saveApiKey("sk-firstapi-responses", "openai-default");
+
+        mockMvc.perform(post("/v1/responses")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + key)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"model\":\"gpt-5.4\",\"input\":\"reply pong\",\"stream\":false}"))
+                .andExpect(status().isOk())
+                .andExpect(content().contentType(MediaType.APPLICATION_JSON))
+                .andExpect(jsonPath("$.object").value("response"))
+                .andExpect(jsonPath("$.status").value("completed"))
+                .andExpect(jsonPath("$.output[0].content[0].text").value("pong"))
+                .andExpect(jsonPath("$.usage.total_tokens").value(18));
+
+        RecordedRequest request = OPENAI_SERVER.takeRequest(1, TimeUnit.SECONDS);
+        assertThat(request).isNotNull();
+        assertThat(request.getPath()).isEqualTo("/v1/responses");
+    }
+
+    @Test
     void preservesClaudeUpstreamErrors() throws Exception {
         OPENAI_SERVER.enqueue(new MockResponse()
                 .setResponseCode(429)
@@ -230,6 +403,45 @@ class RelayControllerTest {
                         .content("{\"model\":\"claude-3-5-sonnet\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}"))
                 .andExpect(status().isTooManyRequests())
                 .andExpect(content().string(containsString("slow down")));
+    }
+
+    @Test
+    void rejectsOpenAiToolCallingFieldsForClaudeModels() throws Exception {
+        String key = saveApiKey("sk-firstapi-claude-tools", "claude-default");
+
+        mockMvc.perform(post("/v1/chat/completions")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + key)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "model": "claude-3-5-sonnet",
+                                  "tool_choice": "auto",
+                                  "tools": [
+                                    {
+                                      "type": "function",
+                                      "function": {
+                                        "name": "read_file",
+                                        "description": "Read a file from disk",
+                                        "parameters": {
+                                          "type": "object",
+                                          "properties": {}
+                                        }
+                                      }
+                                    }
+                                  ],
+                                  "messages": [
+                                    {
+                                      "role": "user",
+                                      "content": "Read the README"
+                                    }
+                                  ]
+                                }
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().string(containsString("tool calling is only supported for OpenAI models")));
+
+        RecordedRequest request = OPENAI_SERVER.takeRequest(200, TimeUnit.MILLISECONDS);
+        assertThat(request).isNull();
     }
 
     @Test

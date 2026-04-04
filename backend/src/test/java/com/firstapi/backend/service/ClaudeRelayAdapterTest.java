@@ -12,7 +12,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class ClaudeRelayAdapterTest {
 
-    private final ClaudeRelayAdapter adapter = new ClaudeRelayAdapter(new ObjectMapper(), new RelayProperties());
+    private final ClaudeRelayAdapter adapter = new ClaudeRelayAdapter(new ObjectMapper(), new RelayProperties(), null, null, null);
 
     @Test
     void convertsOpenAiMessagesIntoClaudePayload() {

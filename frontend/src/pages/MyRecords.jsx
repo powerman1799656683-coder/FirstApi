@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { api } from '../api';
 import LoadingSpinner from '../components/LoadingSpinner';
+import Pagination from '../components/Pagination';
 
 function pad2(value) {
     return String(value).padStart(2, '0');
@@ -48,8 +49,8 @@ function normalizeStatus(status) {
         return '未知';
     }
     const lower = raw.toLowerCase();
-    if (lower === 'active' || lower === 'enabled' || lower === 'true' || raw === '启用' || raw === '已启用') {
-        return '已启用';
+    if (lower === 'active' || lower === 'enabled' || lower === 'true' || raw === '启用' || raw === '已启用' || raw === '正常') {
+        return '正常';
     }
     if (lower === 'inactive' || lower === 'disabled' || lower === 'false' || raw === '停用' || raw === '已停用') {
         return '已停用';
@@ -121,7 +122,7 @@ function buildTokenUsageRows(items, neverUsedLabel) {
             keyRaw: String(rawSecret || ''),
             keyPreview: maskSecret(rawSecret),
             requestCount: normalizeCount(item?.requestCount ?? item?.requests ?? item?.totalRequests),
-            cost: normalizeCost(item?.cost ?? item?.spend ?? item?.totalCost),
+            cost: normalizeCost(item?.totalCost ?? item?.cost ?? item?.spend),
             lastUsed: item?.lastUsed || neverUsedLabel,
             lastUsedAt: lastUsedAt || createdAt,
         };
@@ -181,6 +182,10 @@ export default function MyRecordsPage() {
     const [detailFilters, setDetailFilters] = useState(buildDefaultDetailFilters);
     const [appliedDetailFilters, setAppliedDetailFilters] = useState(buildDefaultDetailFilters);
     const [copiedTokenId, setCopiedTokenId] = useState(null);
+    const [detailPage, setDetailPage] = useState(1);
+    const [detailPageSize, setDetailPageSize] = useState(10);
+    const [recordPage, setRecordPage] = useState(1);
+    const [recordPageSize, setRecordPageSize] = useState(10);
 
     const loadData = useCallback((kw) => {
         setIsLoading(true);
@@ -192,8 +197,14 @@ export default function MyRecordsPage() {
         .finally(() => setTimeout(() => setIsLoading(false), 300));
     }, []);
 
-    const loadTokenUsage = useCallback(() => {
-        api.get('/user/api-keys')
+    const loadTokenUsage = useCallback((filters) => {
+        const params = new URLSearchParams();
+        if (filters?.name) params.set('keyword', filters.name);
+        if (filters?.start) params.set('start', filters.start.replace(' ', 'T'));
+        if (filters?.end) params.set('end', filters.end.replace(' ', 'T'));
+        const qs = params.toString();
+        const url = qs ? `/user/api-keys?${qs}` : '/user/api-keys';
+        api.get(url)
             .then((data) => {
                 const items = normalizeApiKeyItems(data);
                 setTokenUsageRows(buildTokenUsageRows(items, copy.tokenDetail.neverUsed));
@@ -204,10 +215,11 @@ export default function MyRecordsPage() {
     }, []);
 
     useEffect(() => {
-        loadTokenUsage();
+        loadTokenUsage(appliedDetailFilters);
     }, [loadTokenUsage]);
 
     useEffect(() => {
+        setRecordPage(1);
         const timer = setTimeout(() => {
             loadData(keyword);
         }, 300);
@@ -215,36 +227,13 @@ export default function MyRecordsPage() {
     }, [keyword]);
 
     const filteredTokenUsageRows = useMemo(() => {
-        const nameKeyword = toLowerText(appliedDetailFilters.name).trim();
         const secretKeyword = toLowerText(appliedDetailFilters.secret).trim();
-        const start = parseDateValue(appliedDetailFilters.start);
-        const end = parseDateValue(appliedDetailFilters.end);
-
+        if (!secretKeyword) {
+            return tokenUsageRows;
+        }
         return tokenUsageRows.filter((item) => {
-            if (nameKeyword && !toLowerText(item.name).includes(nameKeyword)) {
-                return false;
-            }
-
-            if (secretKeyword) {
-                const joinedSecret = `${toLowerText(item.keyRaw)} ${toLowerText(item.keyPreview)}`;
-                if (!joinedSecret.includes(secretKeyword)) {
-                    return false;
-                }
-            }
-
-            if (!item.lastUsedAt) {
-                return true;
-            }
-
-            if (start && item.lastUsedAt < start) {
-                return false;
-            }
-
-            if (end && item.lastUsedAt > end) {
-                return false;
-            }
-
-            return true;
+            const joinedSecret = `${toLowerText(item.keyRaw)} ${toLowerText(item.keyPreview)}`;
+            return joinedSecret.includes(secretKeyword);
         });
     }, [tokenUsageRows, appliedDetailFilters]);
 
@@ -256,13 +245,18 @@ export default function MyRecordsPage() {
     };
 
     const handleApplyDetailFilters = () => {
-        setAppliedDetailFilters({ ...detailFilters });
+        const newFilters = { ...detailFilters };
+        setAppliedDetailFilters(newFilters);
+        setDetailPage(1);
+        loadTokenUsage(newFilters);
     };
 
     const handleResetDetailFilters = () => {
         const defaults = buildDefaultDetailFilters();
         setDetailFilters(defaults);
         setAppliedDetailFilters(defaults);
+        setDetailPage(1);
+        loadTokenUsage(defaults);
     };
 
     const handleCopyToken = async (item) => {
@@ -284,22 +278,21 @@ export default function MyRecordsPage() {
         }, 1400);
     };
 
-    const tokenSummary = filteredTokenUsageRows.length === 0
-        ? '显示第 0 条，共 0 条'
-        : `显示第 1 条 - 第 ${filteredTokenUsageRows.length} 条，共 ${filteredTokenUsageRows.length} 条`;
+    const detailTotal = filteredTokenUsageRows.length;
+    const detailTotalPages = Math.max(1, Math.ceil(detailTotal / detailPageSize));
+    const safeDetailPage = Math.min(detailPage, detailTotalPages);
+    const detailStartIndex = (safeDetailPage - 1) * detailPageSize;
+    const detailEndIndex = Math.min(detailStartIndex + detailPageSize, detailTotal);
+    const pagedTokenUsageRows = filteredTokenUsageRows.slice(detailStartIndex, detailEndIndex);
+
+    const recordTotal = myRecords.length;
+    const recordTotalPages = Math.max(1, Math.ceil(recordTotal / recordPageSize));
+    const safeRecordPage = Math.min(recordPage, recordTotalPages);
+    const pagedRecords = myRecords.slice((safeRecordPage - 1) * recordPageSize, safeRecordPage * recordPageSize);
+
 
     return (
         <div className="page-content">
-            <div className="records-focus-banner chart-card">
-                <div>
-                    <p className="records-focus-kicker">{copy.kicker}</p>
-                    <h2 className="records-focus-title">{copy.title}</h2>
-                    <p className="records-focus-description">
-                        {copy.description}
-                    </p>
-                </div>
-            </div>
-
             <div className="records-stats-grid">
                 {stats.map((stat, index) => (
                     <div key={index} className="stat-card">
@@ -315,10 +308,9 @@ export default function MyRecordsPage() {
                 ))}
             </div>
 
-            <div className="chart-card token-usage-detail">
+            <div className="chart-card chart-card--stable token-usage-detail">
                 <div className="token-usage-detail-header">
                     <h3>{copy.tokenDetail.title}</h3>
-                    <span>{tokenSummary}</span>
                 </div>
 
                 <div className="token-usage-detail-filters">
@@ -380,18 +372,18 @@ export default function MyRecordsPage() {
                             </tr>
                         </thead>
                         <tbody>
-                            {filteredTokenUsageRows.length === 0 ? (
+                            {pagedTokenUsageRows.length === 0 ? (
                                 <tr>
                                     <td colSpan={6} className="records-empty-row">
                                         {copy.tokenDetail.empty}
                                     </td>
                                 </tr>
                             ) : (
-                                filteredTokenUsageRows.map((item) => (
+                                pagedTokenUsageRows.map((item) => (
                                     <tr key={item.id} className="table-row-hover">
                                         <td style={{ fontWeight: 600 }}>{item.name}</td>
                                         <td>
-                                            <span className={`token-usage-detail-status ${item.status === '已启用' ? 'is-enabled' : 'is-disabled'}`}>
+                                            <span className={`token-usage-detail-status ${item.status === '正常' ? 'is-enabled' : 'is-disabled'}`}>
                                                 {item.status}
                                             </span>
                                         </td>
@@ -420,6 +412,16 @@ export default function MyRecordsPage() {
                         </tbody>
                     </table>
                 </div>
+
+                <Pagination
+                    currentPage={safeDetailPage}
+                    totalPages={detailTotalPages}
+                    onPageChange={setDetailPage}
+                    pageSize={detailPageSize}
+                    onPageSizeChange={(size) => { setDetailPageSize(size); setDetailPage(1); }}
+                    total={detailTotal}
+                    pageSizeOptions={[5, 10, 20, 50]}
+                />
             </div>
 
             <div className="controls-row">
@@ -437,7 +439,7 @@ export default function MyRecordsPage() {
                 </div>
             </div>
 
-            <div className="chart-card" style={{ padding: 0 }}>
+            <div className="chart-card chart-card--stable my-records-log-card" style={{ padding: 0 }}>
                 <table style={{ width: '100%' }}>
                     <thead>
                         <tr>
@@ -450,12 +452,12 @@ export default function MyRecordsPage() {
                         </tr>
                     </thead>
                     <tbody>
-                        {myRecords.length === 0 ? (
+                        {pagedRecords.length === 0 ? (
                             <tr>
                                 <td colSpan={6} className="records-empty-row">{copy.emptyRecords}</td>
                             </tr>
                         ) : (
-                            myRecords.map((record) => (
+                            pagedRecords.map((record) => (
                                 <tr key={record.id} className="table-row-hover">
                                     <td style={{ color: 'var(--text-muted)', fontSize: '13px' }}>{record.time}</td>
                                     <td>
@@ -475,6 +477,14 @@ export default function MyRecordsPage() {
                         )}
                     </tbody>
                 </table>
+                <Pagination
+                    currentPage={safeRecordPage}
+                    totalPages={recordTotalPages}
+                    onPageChange={setRecordPage}
+                    pageSize={recordPageSize}
+                    onPageSizeChange={(size) => { setRecordPageSize(size); setRecordPage(1); }}
+                    total={recordTotal}
+                />
             </div>
         </div>
     );

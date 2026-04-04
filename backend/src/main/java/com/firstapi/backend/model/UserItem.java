@@ -12,10 +12,12 @@ public class UserItem implements SimpleStore.Identifiable {
     private String role;
     private String status;
     private String time;
+    private String loginIp;
+    private String loginLocation;
 
     public UserItem() {}
 
-    public UserItem(Long id, String email, String username, String balance, String group, String role, String status, String time) {
+    public UserItem(Long id, String email, String username, String balance, String group, String role, String status, String time, String loginIp, String loginLocation) {
         this.id = id;
         this.email = email;
         this.username = username;
@@ -24,6 +26,8 @@ public class UserItem implements SimpleStore.Identifiable {
         this.role = role;
         this.status = status;
         this.time = time;
+        this.loginIp = loginIp;
+        this.loginLocation = loginLocation;
     }
 
     @Override public Long getId() { return id; }
@@ -42,6 +46,10 @@ public class UserItem implements SimpleStore.Identifiable {
     public void setStatus(String status) { this.status = status; }
     public String getTime() { return time; }
     public void setTime(String time) { this.time = time; }
+    public String getLoginIp() { return loginIp; }
+    public void setLoginIp(String loginIp) { this.loginIp = loginIp; }
+    public String getLoginLocation() { return loginLocation; }
+    public void setLoginLocation(String loginLocation) { this.loginLocation = loginLocation; }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     public static class Request {

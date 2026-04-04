@@ -41,6 +41,15 @@ public class AuthUserRepository {
         return users.isEmpty() ? null : users.get(0);
     }
 
+    public AuthUser findByEmail(String email) {
+        List<AuthUser> users = jdbcTemplate.query(
+                "select `id`, `username`, `email`, `display_name`, `password_hash`, `role_name`, `enabled`, `last_login` from `auth_users` where `email` = ?",
+                rowMapper,
+                email
+        );
+        return users.isEmpty() ? null : users.get(0);
+    }
+
     public AuthUser findById(Long id) {
         List<AuthUser> users = jdbcTemplate.query(
                 "select `id`, `username`, `email`, `display_name`, `password_hash`, `role_name`, `enabled`, `last_login` from `auth_users` where `id` = ?",

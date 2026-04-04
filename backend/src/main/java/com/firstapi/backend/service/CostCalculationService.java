@@ -5,12 +5,12 @@ import com.firstapi.backend.repository.ModelPricingRepository;
 import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static java.math.RoundingMode.HALF_UP;
 
@@ -21,7 +21,10 @@ public class CostCalculationService {
     private static final BigDecimal ONE_MILLION = BigDecimal.valueOf(1_000_000);
 
     private final ModelPricingRepository pricingRepository;
-    private volatile List<ModelPricingItem> pricingCache = Collections.emptyList();
+    // 使用 AtomicReference 替代 volatile，保证对缓存列表的写操作以原子方式发布，
+    // 避免 volatile 仅保证可见性、不保证复合操作原子性的潜在竞态条件。
+    private final AtomicReference<List<ModelPricingItem>> pricingCache =
+            new AtomicReference<>(Collections.emptyList());
 
     public CostCalculationService(ModelPricingRepository pricingRepository) {
         this.pricingRepository = pricingRepository;
@@ -30,15 +33,11 @@ public class CostCalculationService {
     @PostConstruct
     public void refreshCache() {
         try {
-            this.pricingCache = pricingRepository.findAllEnabledEffective();
+            List<ModelPricingItem> loaded = pricingRepository.findAllEnabledEffective();
+            pricingCache.set(loaded != null ? loaded : Collections.emptyList());
         } catch (Exception e) {
             LOGGER.warn("Failed to load pricing cache", e);
         }
-    }
-
-    @Scheduled(fixedRate = 5 * 60 * 1000)
-    public void scheduledRefresh() {
-        refreshCache();
     }
 
     /**
@@ -89,7 +88,9 @@ public class CostCalculationService {
      * 同级多条取 effective_from 最近的。
      */
     public ModelPricingItem matchPricing(String requestModel) {
-        if (requestModel == null || pricingCache == null) return null;
+        if (requestModel == null) return null;
+        List<ModelPricingItem> cache = pricingCache.get();
+        if (cache == null || cache.isEmpty()) return null;
 
         String requestProvider = inferProvider(requestModel);
 
@@ -98,7 +99,7 @@ public class CostCalculationService {
         ModelPricingItem defaultMatch = null;
         int longestPrefix = -1;
 
-        for (ModelPricingItem item : pricingCache) {
+        for (ModelPricingItem item : cache) {
             String type = item.getMatchType();
             String name = item.getModelName();
 

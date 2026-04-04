@@ -8,6 +8,8 @@ create table if not exists `users` (
     `role_name` varchar(128) not null,
     `status_name` varchar(128) not null,
     `time_label` varchar(64) not null,
+    `login_ip` varchar(64) not null default '',
+    `login_location` varchar(255) not null default '',
     `updated_at` timestamp not null default current_timestamp,
     primary key (`id`)
 );
@@ -96,6 +98,8 @@ create table if not exists `accounts` (
     `tls_fingerprint_mode` varchar(32) not null default 'NONE',
     `session_id_masquerade_enabled` tinyint(1) not null default 0,
     `session_id_masquerade_ttl_minutes` int not null default 15,
+    `encrypted_refresh_token` text null,
+    `oauth_token_expires_at` varchar(64) null,
     `updated_at` timestamp not null default current_timestamp,
     primary key (`id`)
 );
@@ -347,6 +351,7 @@ create table if not exists `account_oauth_sessions` (
     `exchanged_at` datetime null,
     `consumed_at` datetime null,
     `created_by` bigint not null,
+    `encrypted_refresh_token` text null,
     `updated_at` timestamp not null default current_timestamp,
     primary key (`id`),
     unique (`session_id`),

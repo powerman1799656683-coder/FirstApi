@@ -1,7 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import {
     Activity,
+    Check,
     Copy,
+    Edit3,
     Key,
     Plus,
     RefreshCw,
@@ -16,7 +18,23 @@ function copyToClipboard(text) {
     if (!text) {
         return Promise.resolve(false);
     }
-    return navigator.clipboard.writeText(text).then(() => true).catch(() => false);
+    if (navigator.clipboard && window.isSecureContext) {
+        return navigator.clipboard.writeText(text).then(() => true).catch(() => false);
+    }
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    textarea.style.position = 'fixed';
+    textarea.style.left = '-9999px';
+    document.body.appendChild(textarea);
+    textarea.select();
+    try {
+        document.execCommand('copy');
+        return Promise.resolve(true);
+    } catch {
+        return Promise.resolve(false);
+    } finally {
+        document.body.removeChild(textarea);
+    }
 }
 
 export default function MyApiKeysPage() {
@@ -27,6 +45,10 @@ export default function MyApiKeysPage() {
     const [formError, setFormError] = useState('');
     const [secretState, setSecretState] = useState({ open: false, value: '', name: '', action: '' });
     const [groups, setGroups] = useState([]);
+    const [copiedId, setCopiedId] = useState(null);
+    const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+    const [editData, setEditData] = useState({ id: null, name: '', groupId: '' });
+    const [editError, setEditError] = useState('');
 
     const loadData = (nextKeyword = keyword) => {
         api.get('/user/api-keys' + (nextKeyword ? '?keyword=' + encodeURIComponent(nextKeyword) : '')).then((data) => {
@@ -89,10 +111,51 @@ export default function MyApiKeysPage() {
         });
     };
 
+    const handleCopyKey = (id) => {
+        api.get('/user/api-keys/' + id + '/reveal').then((data) => {
+            if (data.plainTextKey) {
+                copyToClipboard(data.plainTextKey).then((ok) => {
+                    if (ok) {
+                        setCopiedId(id);
+                        setTimeout(() => setCopiedId(null), 1500);
+                    }
+                });
+            }
+        });
+    };
+
     const handleSearch = (event) => {
         const nextKeyword = event.target.value;
         setKeyword(nextKeyword);
         loadData(nextKeyword);
+    };
+
+    const openEditModal = (item) => {
+        setEditData({ id: item.id, name: item.name, groupId: item.groupId || '' });
+        setEditError('');
+        setIsEditModalOpen(true);
+    };
+
+    const closeEditModal = () => {
+        setIsEditModalOpen(false);
+        setEditData({ id: null, name: '', groupId: '' });
+        setEditError('');
+    };
+
+    const handleEditSubmit = () => {
+        setEditError('');
+        const payload = { name: editData.name };
+        if (editData.groupId) {
+            payload.groupId = Number(editData.groupId);
+        }
+        api.put('/user/api-keys/' + editData.id, payload)
+            .then(() => {
+                closeEditModal();
+                loadData();
+            })
+            .catch((error) => {
+                setEditError(error.message || '修改 API 密钥失败');
+            });
     };
 
     return (
@@ -141,7 +204,16 @@ export default function MyApiKeysPage() {
                             <tr key={item.id} className="table-row-hover">
                                 <td style={{ fontWeight: '600', color: 'var(--primary-tech)' }}>{item.name}</td>
                                 <td style={{ fontFamily: 'monospace', color: 'var(--text-muted)' }}>
-                                    {item.keyPreview || '\u5df2\u9690\u85cf'}
+                                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                                        {item.keyPreview || '\u5df2\u9690\u85cf'}
+                                        <span
+                                            onClick={() => handleCopyKey(item.id)}
+                                            style={{ cursor: 'pointer', color: copiedId === item.id ? '#10b981' : 'var(--text-muted)', transition: 'color 0.2s' }}
+                                            title={'\u590d\u5236\u5bc6\u94a5'}
+                                        >
+                                            {copiedId === item.id ? <Check size={14} /> : <Copy size={14} />}
+                                        </span>
+                                    </span>
                                 </td>
                                 <td>{item.groupName || '-'}</td>
                                 <td>
@@ -162,6 +234,15 @@ export default function MyApiKeysPage() {
                                 <td style={{ color: 'var(--text-muted)', fontSize: '12px' }}>{item.created}</td>
                                 <td>
                                     <div style={{ display: 'flex', gap: '16px', color: 'var(--text-muted)' }}>
+                                        <button
+                                            className="nav-item nav-item--button"
+                                            type="button"
+                                            style={{ padding: 0, margin: 0, color: 'inherit' }}
+                                            onClick={() => openEditModal(item)}
+                                        >
+                                            <Edit3 size={14} />
+                                            <span style={{ fontSize: '10px' }}>{'修改'}</span>
+                                        </button>
                                         <button
                                             className="nav-item nav-item--button"
                                             type="button"
@@ -259,6 +340,43 @@ export default function MyApiKeysPage() {
                 <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
                     {'\u5b8c\u6574\u5bc6\u94a5\u4ec5\u5728\u521b\u5efa\u540e\u663e\u793a\u4e00\u6b21\uff0c\u8bf7\u5b58\u50a8\u5728\u5b89\u5168\u7684\u4f4d\u7f6e\u3002'}
                 </p>
+            </Modal>
+
+            <Modal
+                isOpen={isEditModalOpen}
+                onClose={closeEditModal}
+                title={'修改 API 密钥'}
+                error={editError}
+                footer={(
+                    <>
+                        <button className="select-control" onClick={closeEditModal}>{'取消'}</button>
+                        <button className="btn-primary" onClick={handleEditSubmit}>{'保存'}</button>
+                    </>
+                )}
+            >
+                <div className="form-group">
+                    <label className="form-label">{'密钥名称'}</label>
+                    <input
+                        type="text"
+                        className="form-input"
+                        placeholder={'例如：生产服务 或 本地测试'}
+                        value={editData.name}
+                        onChange={(event) => setEditData({ ...editData, name: event.target.value })}
+                    />
+                </div>
+                <div className="form-group">
+                    <label className="form-label">{'分组'}</label>
+                    <select
+                        className="form-input"
+                        value={editData.groupId}
+                        onChange={(event) => setEditData({ ...editData, groupId: event.target.value })}
+                    >
+                        <option value="">{'不分配分组'}</option>
+                        {groups.map((g) => (
+                            <option key={g.id} value={g.id}>{g.name}{g.platform ? ` (${g.platform})` : ''}</option>
+                        ))}
+                    </select>
+                </div>
             </Modal>
 
             <Modal

@@ -27,10 +27,6 @@ public class ClaudeRelayAdapter {
     private final SensitiveDataService sensitiveDataService;
     private final UpstreamHttpClient upstreamHttpClient;
 
-    public ClaudeRelayAdapter(ObjectMapper objectMapper, RelayProperties relayProperties) {
-        this(objectMapper, relayProperties, null, null, null);
-    }
-
     @Autowired
     public ClaudeRelayAdapter(ObjectMapper objectMapper,
                               RelayProperties relayProperties,
@@ -111,6 +107,7 @@ public class ClaudeRelayAdapter {
             );
             upstream.setAccountId(account.getId());
             upstream.setProvider("claude");
+            upstream.setAuthMethod(account.getAuthMethod());
 
             if (!upstream.isSuccess()) {
                 return upstream;
@@ -169,10 +166,65 @@ public class ClaudeRelayAdapter {
             );
             upstream.setAccountId(account.getId());
             upstream.setProvider("claude");
+            upstream.setAuthMethod(account.getAuthMethod());
             return upstream;
         } finally {
             relayAccountSelector.releaseAccount(account);
         }
+    }
+
+    /**
+     * 流式 Relay: Claude /v1/messages 原生格式直转发（无格式转换）。
+     */
+    public RelayResult relayMessagesStreaming(JsonNode requestBody, RelayRoute route,
+                                              String accountType, String anthropicVersion,
+                                              java.io.OutputStream clientOutput) {
+        AccountItem account = relayAccountSelector.selectAccount(route.getProvider(), accountType);
+        try {
+            Map<String, String> headers = buildClaudeHeaders(account, anthropicVersion);
+            JsonNode body = injectOAuthSystemPrompt(requestBody, account);
+            String baseUrl = relayAccountSelector.resolveBaseUrl(account, route.getProvider());
+            IpItem proxy = relayAccountSelector.resolveProxy(account);
+            RelayResult upstream = upstreamHttpClient.postJsonStreaming(
+                    baseUrl + "/v1/messages", headers, body, proxy,
+                    chunk -> {
+                        try {
+                            clientOutput.write(chunk);
+                            clientOutput.flush();
+                        } catch (java.io.IOException ignored) {
+                        }
+                    });
+            upstream.setAccountId(account.getId());
+            upstream.setProvider("claude");
+            upstream.setAuthMethod(account.getAuthMethod());
+            return upstream;
+        } finally {
+            relayAccountSelector.releaseAccount(account);
+        }
+    }
+
+    /**
+     * 对指定账号发送一次最小化真实探针请求（与正常中转完全一致的 headers + payload），
+     * 供账号测试使用，不走 selectAccount/releaseAccount。
+     */
+    public RelayResult probeAccount(AccountItem account, IpItem proxy) {
+        Map<String, String> headers = buildClaudeHeaders(account, null);
+        String baseUrl = relayAccountSelector.resolveBaseUrl(account, "anthropic");
+
+        // 构造最小化探针 payload，与真实请求相同格式
+        tools.jackson.databind.node.ObjectNode body = objectMapper.createObjectNode();
+        body.put("model", relayProperties.getProbeClaudeModel());
+        body.put("max_tokens", 1);
+        body.putArray("messages").addObject().put("role", "user").put("content", "hi");
+
+        // OAuth 账号必须注入 system prompt，否则会被拒绝（与真实请求一致）
+        JsonNode finalBody = injectOAuthSystemPrompt(body, account);
+
+        RelayResult result = upstreamHttpClient.postJson(baseUrl + "/v1/messages", headers, finalBody, proxy);
+        result.setAccountId(account.getId());
+        result.setProvider("claude");
+        result.setAuthMethod(account.getAuthMethod());
+        return result;
     }
 
     private Map<String, String> buildClaudeHeaders(AccountItem account, String anthropicVersion) {
@@ -187,6 +239,14 @@ public class ClaudeRelayAdapter {
         }
         headers.put("anthropic-version", resolveAnthropicVersion(anthropicVersion));
         return headers;
+    }
+
+    private boolean isStandardApiKey(String credential) {
+        if (credential == null) return false;
+        // OAuth tokens start with sk-ant-oaut — these are NOT standard API keys
+        if (credential.startsWith("sk-ant-oaut")) return false;
+        // Standard console API keys start with sk-ant-api or sk-
+        return credential.startsWith("sk-");
     }
 
     /**
@@ -306,6 +366,17 @@ public class ClaudeRelayAdapter {
                 String eventType = textOrFallback(payload.path("type").asText(null), currentEvent);
                 if ("message_start".equals(eventType)) {
                     chunkId = normalizeChunkId(payload.path("message").path("id").asText(chunkId));
+                    // message_start.message.usage 可能包含 input_tokens 和 output_tokens
+                    JsonNode msgUsage = payload.path("message").path("usage");
+                    if (!msgUsage.isMissingNode()) {
+                        if (msgUsage.has("input_tokens")) {
+                            promptTokens = Integer.valueOf(msgUsage.path("input_tokens").asInt());
+                        }
+                        if (msgUsage.has("output_tokens")) {
+                            completionTokens = Integer.valueOf(msgUsage.path("output_tokens").asInt());
+                        }
+                        usageJson = msgUsage.toString();
+                    }
                     continue;
                 }
                 if ("content_block_start".equals(eventType)) {
@@ -328,13 +399,22 @@ public class ClaudeRelayAdapter {
                     finishReason = mapFinishReason(payload.path("delta").path("stop_reason").asText(null));
                     JsonNode usageNode = payload.path("usage");
                     if (!usageNode.isMissingNode()) {
+                        // message_delta.usage 可能包含 input_tokens 和/或 output_tokens
                         if (usageNode.has("input_tokens")) {
                             promptTokens = Integer.valueOf(usageNode.path("input_tokens").asInt());
                         }
                         if (usageNode.has("output_tokens")) {
                             completionTokens = Integer.valueOf(usageNode.path("output_tokens").asInt());
                         }
-                        usageJson = usageNode.toString();
+                        // 合并所有已收集的 token 数据
+                        ObjectNode merged = objectMapper.createObjectNode();
+                        if (promptTokens != null) {
+                            merged.put("input_tokens", promptTokens.intValue());
+                        }
+                        if (completionTokens != null) {
+                            merged.put("output_tokens", completionTokens.intValue());
+                        }
+                        usageJson = merged.toString();
                     }
                     continue;
                 }

@@ -6,8 +6,10 @@ import com.firstapi.backend.model.ApiKeyItem;
 import com.firstapi.backend.model.GroupItem;
 import com.firstapi.backend.repository.GroupRepository;
 import com.firstapi.backend.service.MyApiKeysService;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -24,8 +26,11 @@ public class MyApiKeysController {
     }
 
     @GetMapping
-    public ApiResponse<PageResponse<ApiKeyItem>> list(@RequestParam(value = "keyword", required = false) String keyword) {
-        return ApiResponse.ok(service.list(keyword));
+    public ApiResponse<PageResponse<ApiKeyItem>> list(
+            @RequestParam(value = "keyword", required = false) String keyword,
+            @RequestParam(value = "start", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime start,
+            @RequestParam(value = "end", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime end) {
+        return ApiResponse.ok(service.list(keyword, start, end));
     }
 
     @GetMapping("/{id}")
