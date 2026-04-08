@@ -6,9 +6,7 @@ import LoadingSpinner from './components/LoadingSpinner';
 import { AuthProvider } from './auth/AuthContext';
 import { HomeIndex, PublicOnlyRoute, RequireAuth, RequireRole } from './auth/RouteGuards';
 import LoginPage from './pages/Login';
-import LoginLegacyPage from './pages/LoginLegacy';
 import RegisterPage from './pages/Register';
-import RegisterLegacyPage from './pages/RegisterLegacy';
 
 // 懒加载页面组件，减少初始包体积，加快首屏渲染速度
 const Users = lazy(() => import('./pages/Users'));
@@ -46,9 +44,7 @@ function App() {
                 <Routes>
                     <Route element={<PublicOnlyRoute />}>
                         <Route path="/login" element={<LoginPage />} />
-                        <Route path="/login-legacy" element={<LoginLegacyPage />} />
                         <Route path="/register" element={<RegisterPage />} />
-                        <Route path="/register-legacy" element={<RegisterLegacyPage />} />
                     </Route>
 
                     <Route element={<RequireAuth />}>

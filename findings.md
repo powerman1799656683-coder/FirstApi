@@ -1,5 +1,14 @@
 # Findings & Decisions
 
+## Session: 2026-04-04 Redundant And Unused Code Audit
+
+### Research Findings
+- This audit is limited to read-only analysis because the worktree already contains many unrelated local changes.
+- `task_plan.md` was missing in the project root at the start of the audit and has been recreated for this session.
+- Existing `findings.md` and `progress.md` contain prior-session notes; this session will append a separate section instead of rewriting history.
+- `rg` is not usable in the current PowerShell environment because launching `rg.exe` returns `Access is denied`; repository scans will use PowerShell-native file discovery instead.
+- `frontend/src/App.jsx` currently registers both `Login/LoginLegacy` and `Register/RegisterLegacy`, which indicates duplicate flows are still intentionally wired rather than fully dead.
+
 ## Session: 2026-03-30 Server Init And Deployment
 
 ### Requirements

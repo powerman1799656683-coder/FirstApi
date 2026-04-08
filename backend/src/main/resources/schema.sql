@@ -229,18 +229,6 @@ create table if not exists `profiles` (
     primary key (`id`)
 ) engine=InnoDB default charset=utf8mb4;
 
-create table if not exists `my_subscription` (
-    `id` bigint not null,
-    `plan_name` varchar(255) not null,
-    `renewal_date` varchar(64) not null,
-    `features_json` json not null,
-    `usage_json` json not null,
-    `request_stats_json` json not null,
-    `history_json` json not null,
-    `updated_at` timestamp not null default current_timestamp on update current_timestamp,
-    primary key (`id`)
-) engine=InnoDB default charset=utf8mb4;
-
 create table if not exists `my_redemption` (
     `id` bigint not null,
     `title` varchar(255) not null,

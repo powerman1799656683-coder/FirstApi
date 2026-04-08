@@ -4,7 +4,6 @@ import com.firstapi.backend.model.RelayChatCompletionRequest;
 import com.firstapi.backend.model.RelayException;
 import com.firstapi.backend.model.RelayResult;
 import com.firstapi.backend.service.RelayService;
-import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;

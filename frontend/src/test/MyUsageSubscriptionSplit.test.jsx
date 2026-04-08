@@ -16,7 +16,7 @@ vi.mock('../api', () => ({
 describe('usage and subscription information split', () => {
     beforeEach(() => {
         api.get.mockImplementation((url) => {
-            if (url === '/user/subscription') {
+            if (url === '/user/quota/summary') {
                 return Promise.resolve({
                     plan: { name: 'Pro', renewalDate: '2026/04/12' },
                     features: ['feature-1'],

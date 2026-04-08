@@ -5,6 +5,7 @@ import com.firstapi.backend.common.PageResponse;
 import com.firstapi.backend.model.AccountItem;
 import com.firstapi.backend.service.AccountOAuthService;
 import com.firstapi.backend.service.AccountService;
+import com.firstapi.backend.service.OAuthTokenRefreshService;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -16,10 +17,13 @@ public class AccountController {
 
     private final AccountService service;
     private final AccountOAuthService oauthService;
+    private final OAuthTokenRefreshService oauthTokenRefreshService;
 
-    public AccountController(AccountService service, AccountOAuthService oauthService) {
+    public AccountController(AccountService service, AccountOAuthService oauthService,
+                             OAuthTokenRefreshService oauthTokenRefreshService) {
         this.service = service;
         this.oauthService = oauthService;
+        this.oauthTokenRefreshService = oauthTokenRefreshService;
     }
 
     @GetMapping
@@ -66,6 +70,15 @@ public class AccountController {
     @PostMapping("/{id}/quota/recover")
     public ApiResponse<AccountItem> recoverQuota(@PathVariable Long id) {
         return ApiResponse.ok("恢复成功", service.recoverQuota(id));
+    }
+
+    @PostMapping("/{id}/refresh-oauth")
+    public ApiResponse<Map<String, Object>> refreshOAuth(@PathVariable Long id) {
+        boolean success = oauthTokenRefreshService.tryRefreshNow(id);
+        AccountItem updated = service.get(id);
+        return ApiResponse.ok(success ? "OAuth 刷新成功" : "OAuth 刷新失败",
+                Map.of("success", success, "oauthTokenExpiresAt",
+                        updated.getOauthTokenExpiresAt() != null ? updated.getOauthTokenExpiresAt() : ""));
     }
 
     // OAuth endpoints
